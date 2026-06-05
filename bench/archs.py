@@ -59,6 +59,9 @@ class SSMTracker(nn.Module):
         for b in self.blocks: h = b(h)
         return self.head(h)
 
-REGISTRY = {"gru": GRUTracker, "lstm": LSTMTracker, "transformer": TransformerTracker, "ssm": SSMTracker}
+from arch_kalman_assoc import KalmanAssocTracker   # learned Kalman predict-correct + vocab-independent assoc
+
+REGISTRY = {"gru": GRUTracker, "lstm": LSTMTracker, "transformer": TransformerTracker, "ssm": SSMTracker,
+            "kanlc": KalmanAssocTracker}
 
 def build(arch, din): return REGISTRY[arch](din)
