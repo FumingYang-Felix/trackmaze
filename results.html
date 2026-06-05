@@ -48,6 +48,16 @@
       look-alike place) and the correction degrades to useless — a graceful threshold, not a cliff.</div></div>
   </div>
 
+  <div class="card">
+    <div class="tag">what's next · direction B</div>
+    <p style="margin:.2em 0 .8em">The fix for the drift is a <b style="color:var(--acc)">structured latent</b>. Train a
+    path-integrator on a periodic arena and its latent spontaneously organizes into a <b>torus</b> (verified
+    b₁=2 by persistent homology) — so returning to a place returns the latent to the <i>same point on the
+    torus</i> (loop closure for free). Below: an agent walking (its latent traces the donut). The open problem
+    is making the <i>maze</i> develop this.</p>
+    <img src="bench/torus_demo.gif" alt="agent walking; latent tracing a torus" style="max-width:680px;display:block;margin:0 auto">
+  </div>
+
   <div class="card" style="color:var(--mut)">
     <b style="color:var(--ink)">In one line.</b> Real state-tracking (path integration) <i>does</i> emerge and drifts
     lawfully; standard nets <i>memorize</i> visual cues rather than using them to correct that drift; the memorization is
