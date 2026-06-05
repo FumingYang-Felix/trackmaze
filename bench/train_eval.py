@@ -17,7 +17,7 @@ from archs import build
 V = 12                       # landmark vocab (ambiguity=1 -> ids transfer across sizes)
 AMB = 1
 TRAIN_N, TRAIN_T, TRAIN_EPS = 6, 160, 200
-EVAL_SIZES = [(6,144),(9,216),(12,288),(16,384)]   # (n, T): T ~ 24*n so bigger maze = longer horizon
+EVAL_SIZES = [(6,144),(9,216),(12,288),(16,384),(20,480),(24,576)]   # (n,T): T~24n; large sizes probe big-drift OOD
 EVAL_EPS = 60
 CACHE = os.path.join(os.path.dirname(__file__), "_cache"); os.makedirs(CACHE, exist_ok=True)
 
