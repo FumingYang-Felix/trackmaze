@@ -37,23 +37,25 @@ def contrastive(v, cells, gap=8, temp=0.07):
         tot = tot + l[anc].mean(); n += 1
     return tot / max(n, 1)
 
-def train(model, x, y, cells, epochs, dev, bs=32, lr=1e-3, lam=0.5):
-    opt = torch.optim.Adam(model.parameters(), lr=lr); mse = nn.MSELoss()
+def train(model, x, y, cells, epochs, dev, bs=32, lr=1e-3, lam=0.5, beta=1.0):
+    opt = torch.optim.Adam(model.parameters(), lr=lr); mse = nn.MSELoss(); bce = nn.BCELoss()
     model.to(dev); x, y, cells = x.to(dev), y.to(dev), cells.to(dev); E = x.shape[0]
     for ep in range(epochs):
-        perm = torch.randperm(E); tot = 0.0; tc = 0.0
+        perm = torch.randperm(E); tot = tc = tcf = 0.0
         for i in range(0, E, bs):
             b = perm[i:i+bs]; opt.zero_grad()
-            mu, v, mu_prior = model(x[b], return_aux=True)
+            mu, v, mu_prior, g, lbl = model(x[b], gt_disp=y[b], return_aux=True)
             lm = mse(mu, y[b]) + 1.0 * mse(mu_prior, y[b])      # protect the landmark-free integrator floor
             lc = contrastive(v, cells[b])
-            (lm + lam * lc).backward(); opt.step(); tot += lm.item(); tc += lc.item()
-        if (ep+1) % 15 == 0: print(f"    epoch {ep+1:3d}  pos {tot/((E+bs-1)//bs):.3f}  contrast {tc/((E+bs-1)//bs):.3f}")
+            lcf = bce(g.clamp(1e-6, 1-1e-6), lbl) if g is not None else torch.zeros((), device=dev)  # GT-bound confidence
+            (lm + lam * lc + beta * lcf).backward(); opt.step(); tot += lm.item(); tc += lc.item(); tcf += float(lcf)
+        if (ep+1) % 15 == 0:
+            nb = (E+bs-1)//bs; print(f"    epoch {ep+1:3d}  pos {tot/nb:.3f}  contrast {tc/nb:.3f}  conf-bce {tcf/nb:.3f}")
     return model
 
 @torch.no_grad()
-def final_err(model, ds, dev, use_memory, gate_mode="learned", thresh=0.5):
-    model.eval(); model.use_memory = use_memory; model.gate_mode = gate_mode; model.gate_thresh = thresh
+def final_err(model, ds, dev, use_memory):
+    model.eval(); model.use_memory = use_memory
     x,_ = encode(ds); mu = model(x.to(dev)).cpu().numpy()
     return per_step_error(mu, ds["disp"])
 
@@ -67,36 +69,25 @@ def main():
     x, y = encode(tr); cells = cell_ids(tr["pos"]); din = x.shape[2]
     model = RLCTracker(din); train(model, x, y, cells, a.epochs, dev, lam=a.lam)
 
-    print(f"\n[RLC seed{a.seed}] final error (cells). OFF=integrator only; others correct via learned place-code matches")
-    print(f"{'size':>6}  {'OFF(int)':>9}  {'learned':>9}  {'g=match':>9}  {'hard.4':>9}  {'hard.6':>9}  {'open':>6}")
+    print(f"\n[RLC v2 seed{a.seed}] final error (cells). OFF=integrator only, ON=GT-bound calibrated correction")
+    print(f"{'size':>6}  {'OFF(int)':>9}  {'ON(corr)':>9}  {'benefit':>9}  {'open':>6}")
     for n, T in EVAL_SIZES:
         te = cached(f"eval_n{n}_T{T}_a{AMB}", n=n, n_eps=EVAL_EPS, T=T, ambiguity=AMB, seed=7)
-        off  = final_err(model, te, dev, False)[:, -1].mean()
-        lrn  = final_err(model, te, dev, True, "learned")[:, -1].mean()
-        mtc  = final_err(model, te, dev, True, "match")[:, -1].mean()
-        h4   = final_err(model, te, dev, True, "hard", 0.4)[:, -1].mean()
-        h6   = final_err(model, te, dev, True, "hard", 0.6)[:, -1].mean()
+        off = final_err(model, te, dev, False)[:, -1].mean()
+        on  = final_err(model, te, dev, True)[:, -1].mean()
         ol = per_step_error(np.stack([dead_reckon(te["action"][e], (0.,0.), 0.) for e in range(te["action"].shape[0])]), te["disp"])[:, -1].mean()
-        print(f"{('n='+str(n)):>6}  {off:9.2f}  {lrn:9.2f}  {mtc:9.2f}  {h4:9.2f}  {h6:9.2f}  {ol:6.2f}")
+        print(f"{('n='+str(n)):>6}  {off:9.2f}  {on:9.2f}  {off-on:+9.2f}  {ol:6.2f}")
 
-    # --- diagnostics on an UNSEEN test maze (n=12): why isn't the correction firing? ---
+    # --- confidence calibration on an UNSEEN maze (n=12): does the trust head fire ONLY on helpful matches? ---
     te = cached(f"eval_n12_T288_a{AMB}", n=12, n_eps=EVAL_EPS, T=288, ambiguity=AMB, seed=7)
-    model.diag = True; model.use_memory = True; model.gate_mode = "match"
-    x,_ = encode(te); model(x.to(dev)); model.diag = False
-    print(f"\nDIAG (n=12, unseen maze): {model.diag_stats}")
-    # place-embedding discriminability on the unseen maze: same-cell-distant vs different-cell cosine
+    model.use_memory = True; x, yv = encode(te)
     with torch.no_grad():
-        rays, act, lm_id = __import__("arch_rlc").split_obs(x.to(dev))
-        v = model.encode_view(rays, lm_id).cpu()         # (E,T,d) unit-norm
-    cells = cell_ids(te["pos"]); E, T, _ = v.shape
-    same_s, diff_s, ns, nd = 0.0, 0.0, 0, 0
-    for b in range(min(E, 20)):
-        sim = (v[b] @ v[b].t()).numpy(); cl = cells[b].numpy()
-        ti = np.arange(T); far = np.abs(ti[:, None] - ti[None, :]) > 8
-        same = (cl[:, None] == cl[None, :]) & far; diff = (cl[:, None] != cl[None, :]) & far
-        same_s += sim[same].sum(); ns += same.sum(); diff_s += sim[diff].sum(); nd += diff.sum()
-    print(f"place-embed cosine — SAME cell(distant): {same_s/max(ns,1):.3f}   DIFF cell: {diff_s/max(nd,1):.3f}   "
-          f"gap: {same_s/max(ns,1) - diff_s/max(nd,1):.3f}  (need a big positive gap for retrieval to fire)")
+        _, v, _, g, lbl = model(x.to(dev), gt_disp=yv.to(dev), return_aux=True)
+    g, lbl = g.cpu().reshape(-1), lbl.cpu().reshape(-1); fire = g > 0.5
+    prec = (lbl[fire].mean().item() if fire.any() else float('nan'))
+    rec = ((g[lbl > 0.5] > 0.5).float().mean().item() if (lbl > 0.5).any() else float('nan'))
+    print(f"\nconfidence (n=12 unseen): fires {fire.float().mean().item():.2f} of steps | when it fires it's RIGHT "
+          f"{prec:.2f} (precision) | catches {rec:.2f} of true matches (recall)")
 
 if __name__ == "__main__":
     main()
