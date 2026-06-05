@@ -11,6 +11,12 @@
   .wrap{max-width:1000px;margin:0 auto;padding:16px}
   h1{font-size:18px;margin:0 0 2px} .sub{color:var(--mut);margin:0 0 14px;font-size:13px}
   .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .main{flex-wrap:nowrap}
+  .main>.card{min-width:0}
+  .main>.card:first-child{flex:1.55}
+  .main>.card:last-child{flex:1}
+  .main canvas{width:100%;height:auto}
+  @media(max-width:680px){ .main{flex-wrap:wrap} .main>.card{flex:1 1 100%} }
   .card{background:var(--panel);border:1px solid #232634;border-radius:10px;padding:10px}
   canvas{display:block;border-radius:6px;background:#000;image-rendering:pixelated}
   .lbl{color:var(--mut);font-size:12px;margin:2px 0 6px;text-transform:uppercase;letter-spacing:.05em}
@@ -32,7 +38,7 @@
   <h1>TrackMaze — 2.5D egocentric state-tracking maze <span style="color:var(--mut);font-weight:400">· playable demo</span></h1>
   <p class="sub">Left = what the <b>agent sees</b> (egocentric, partial). Right = the <b>ground truth</b> it must <i>infer & track</i>. You only get the left view; integrate your motion + recognize landmarks to know where you are. OOD test: learn on small mazes, generalize to big ones.</p>
 
-  <div class="row">
+  <div class="row main">
     <div class="card">
       <div class="lbl">Agent view (egocentric · 2.5D raycast)</div>
       <canvas id="fp" width="520" height="340"></canvas>
