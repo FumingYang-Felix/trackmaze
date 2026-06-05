@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TrackMaze — 2.5D egocentric state-tracking maze (demo)</title>
+<style>
+  :root{ --bg:#0e0f13; --panel:#16181f; --ink:#e8eaf0; --mut:#9aa3b2; --acc:#5ad19a; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:16px}
+  h1{font-size:18px;margin:0 0 2px} .sub{color:var(--mut);margin:0 0 14px;font-size:13px}
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .card{background:var(--panel);border:1px solid #232634;border-radius:10px;padding:10px}
+  canvas{display:block;border-radius:6px;background:#000;image-rendering:pixelated}
+  .lbl{color:var(--mut);font-size:12px;margin:2px 0 6px;text-transform:uppercase;letter-spacing:.05em}
+  .controls{display:flex;gap:22px;flex-wrap:wrap;align-items:center;margin-top:6px}
+  .controls .grp{display:flex;flex-direction:column;gap:8px}
+  .controls label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;color:var(--mut)}
+  .controls .chk{justify-content:flex-start;gap:8px}
+  input[type=range]{width:130px} button{background:#222634;color:var(--ink);border:1px solid #313646;border-radius:7px;padding:7px 12px;cursor:pointer}
+  button:hover{background:#2b3142}
+  .hud{font-variant-numeric:tabular-nums;color:var(--mut);font-size:12px;margin-top:8px}
+  .hud b{color:var(--ink)} .ok{color:var(--acc);font-weight:600}
+  .keys{color:var(--mut);font-size:12px} .keys kbd{background:#222634;border:1px solid #313646;border-radius:4px;padding:1px 6px;color:var(--ink)}
+  .legend{font-size:12px;color:var(--mut);display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-right:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TrackMaze — 2.5D egocentric state-tracking maze <span style="color:var(--mut);font-weight:400">· playable demo</span></h1>
+  <p class="sub">Left = what the <b>agent sees</b> (egocentric, partial). Right = the <b>ground truth</b> it must <i>infer & track</i>. You only get the left view; integrate your motion + recognize landmarks to know where you are. OOD test: learn on small mazes, generalize to big ones.</p>
+
+  <div class="row">
+    <div class="card">
+      <div class="lbl">Agent view (egocentric · 2.5D raycast)</div>
+      <canvas id="fp" width="520" height="340"></canvas>
+      <div class="keys" style="margin-top:8px"><kbd>W</kbd>/<kbd>↑</kbd> forward · <kbd>S</kbd>/<kbd>↓</kbd> back · <kbd>A</kbd>/<kbd>←</kbd> turn left · <kbd>D</kbd>/<kbd>→</kbd> turn right · reach the <span style="color:var(--acc)">green pillar</span></div>
+      <div class="legend"><span><span class="sw" style="background:#5ad19a"></span>goal</span><span><span class="sw" style="background:#8a8f9c"></span>plain wall (no info)</span><span>colored wall = <b>landmark</b> (re-anchor); at low ambiguity each is <b>unique</b>.</span></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">Ground truth (top-down map · landmark ids shown)</div>
+      <canvas id="mm" width="340" height="340"></canvas>
+      <div class="hud" id="hud"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="lbl">Controllable difficulty &nbsp;/&nbsp; probes</div>
+    <div class="controls">
+      <div class="grp">
+        <label>maze size <span id="vS">8</span><input id="S" type="range" min="5" max="20" value="8"></label>
+        <label>landmark density <span id="vL">0.15</span><input id="L" type="range" min="0" max="40" value="15"></label>
+        <label>landmark ambiguity <span id="vA">unique</span><input id="A" type="range" min="0" max="3" value="0"></label>
+      </div>
+      <div class="grp">
+        <label class="chk"><input id="hide" type="checkbox"> localization challenge (hide my dot)</label>
+        <label class="chk"><input id="fog" type="checkbox" checked> fog of war (show only seen)</label>
+        <label class="chk"><input id="trail" type="checkbox" checked> show trail</label>
+      </div>
+      <div class="grp">
+        <button id="regen">⟳ new maze</button>
+        <div class="hud" id="hud2" style="margin-top:2px"></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="sub" style="margin-top:14px"><b>density</b> = how many anchors exist (set 0 → no re-anchoring → pure drift). <b>ambiguity</b> = how unique each anchor is — <b>unique</b>: seeing landmark <code>7</code> pins your location (clean correction); <b>higher</b>: ids repeat (aliasing) → you must disambiguate from your path (the hard, realistic loop-closure regime). Size = the OOD axis.</p>
+</div>
+
+<script>
+const FP=document.getElementById('fp'), fc=FP.getContext('2d');
+const MM=document.getElementById('mm'), mc=MM.getContext('2d');
+let N=8, LMD=0.15, AMB=0;
+let map, col, W, LBINS, seen, trail, pos, dir, goal, steps, reached;
+
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]];}return a;}
+function genMaze(n){
+  W=2*n+1; map=Array.from({length:W},()=>Array(W).fill(1)); col=Array.from({length:W},()=>Array(W).fill(0));
+  const vis=Array.from({length:n},()=>Array(n).fill(false)); const st=[[0,0]]; vis[0][0]=true; map[1][1]=0;
+  while(st.length){
+    const [cx,cy]=st[st.length-1];
+    const nb=shuffle([[0,1],[0,-1],[1,0],[-1,0]]).map(([dx,dy])=>[cx+dx,cy+dy,dx,dy]).filter(([nx,ny])=>nx>=0&&nx<n&&ny>=0&&ny<n&&!vis[ny][nx]);
+    if(nb.length){const [nx,ny,dx,dy]=nb[0]; map[2*cy+1+dy][2*cx+1+dx]=0; map[2*ny+1][2*nx+1]=0; vis[ny][nx]=true; st.push([nx,ny]);}
+    else st.pop();
+  }
+  const lm=[]; for(let y=0;y<W;y++)for(let x=0;x<W;x++) if(map[y][x]===1 && Math.random()<LMD) lm.push([y,x]);
+  shuffle(lm); LBINS = AMB===0 ? Math.max(1,lm.length) : Math.min(lm.length,[0,12,5,2][AMB]);
+  lm.forEach(([y,x],i)=>{ col[y][x] = 1 + (i % LBINS); });
+  seen=Array.from({length:W},()=>Array(W).fill(false));
+  trail=[]; pos={x:1.5,y:1.5}; dir=Math.random()*6.28; steps=0; reached=false;
+  const open=[]; for(let y=0;y<W;y++)for(let x=0;x<W;x++) if(map[y][x]===0) open.push([x,y]);
+  open.sort((a,b)=>((b[0]-1.5)**2+(b[1]-1.5)**2)-((a[0]-1.5)**2+(a[1]-1.5)**2));
+  const gi=(Math.random()*Math.min(6,open.length))|0; goal={x:open[gi][0]+0.5, y:open[gi][1]+0.5};
+  reveal();
+}
+function reveal(){ const R=2.5; for(let y=Math.max(0,(pos.y-R)|0);y<Math.min(W,pos.y+R+1);y++)for(let x=Math.max(0,(pos.x-R)|0);x<Math.min(W,pos.x+R+1);x++) if((x+.5-pos.x)**2+(y+.5-pos.y)**2<R*R) seen[y][x]=true; }
+function hueOf(c){ return ((c-1)/Math.max(1,LBINS))*360; }
+function idStr(c){ return (c-1).toString(36).toUpperCase(); }
+
+const FOV=Math.PI/2.6, H=FP.height, Wc=FP.width, COLW=2, NC=Wc/COLW;
+function grayShade(f){const v=(150*f)|0;return `rgb(${v},${(v*1.03)|0},${(v*1.12)|0})`;}
+function render(){
+  fc.fillStyle='#11131a'; fc.fillRect(0,0,Wc,H/2); fc.fillStyle='#0a0b0f'; fc.fillRect(0,H/2,Wc,H/2);
+  const dx=Math.cos(dir),dy=Math.sin(dir), pX=-dy*Math.tan(FOV/2), pY=dx*Math.tan(FOV/2);
+  const depth=new Float32Array(NC);
+  for(let i=0;i<NC;i++){
+    const cam=2*i/NC-1, rdx=dx+pX*cam, rdy=dy+pY*cam;
+    let mX=pos.x|0,mY=pos.y|0; const ddx=Math.abs(1/rdx),ddy=Math.abs(1/rdy);
+    let sX,sY,sdx,sdy;
+    if(rdx<0){sX=-1;sdx=(pos.x-mX)*ddx;}else{sX=1;sdx=(mX+1-pos.x)*ddx;}
+    if(rdy<0){sY=-1;sdy=(pos.y-mY)*ddy;}else{sY=1;sdy=(mY+1-pos.y)*ddy;}
+    let side=0,hit=0,guard=0;
+    while(!hit&&guard++<256){ if(sdx<sdy){sdx+=ddx;mX+=sX;side=0;}else{sdy+=ddy;mY+=sY;side=1;} if(map[mY]&&map[mY][mX]>0)hit=1; }
+    const pd=side===0?sdx-ddx:sdy-ddy; depth[i]=pd;
+    const lh=Math.min(H, H/pd), y0=(H-lh)/2;
+    const c=col[mY][mX]; const f=Math.max(.16, Math.min(1, 1.25/pd))*(side?0.72:1);
+    fc.fillStyle = c ? `hsl(${hueOf(c)|0},75%,${Math.max(12,Math.min(60,f*58))|0}%)` : grayShade(f);
+    fc.fillRect(i*COLW,y0,COLW+1,lh);
+  }
+  const gx=goal.x-pos.x, gy=goal.y-pos.y, inv=1/(pX*dy-dx*pY);
+  const tx=inv*(dy*gx-dx*gy), ty=inv*(-pY*gx+pX*gy);
+  if(ty>0.15){ const sx=((NC/2)*(1+tx/ty))|0, sh=Math.abs(H/ty)|0, gw=Math.max(3,(sh*0.35)|0);
+    for(let s=-gw;s<gw;s++){ const c=sx+s; if(c<0||c>=NC)continue; if(ty>=depth[c])continue;
+      const t=1-Math.abs(s)/gw; const v=Math.max(.25,Math.min(1,1.4/ty))*t;
+      fc.fillStyle=`rgb(${(40*v)|0},${(209*v)|0},${(154*v)|0})`; fc.fillRect(c*COLW,(H-sh)/2+sh*0.15,COLW+1,sh*0.7); } }
+}
+function drawMM(){
+  const s=MM.width/W; mc.fillStyle='#0a0b0f'; mc.fillRect(0,0,MM.width,MM.height);
+  const fogOn=document.getElementById('fog').checked;
+  mc.textAlign='center'; mc.textBaseline='middle'; mc.font=`${Math.min(s*0.62,12)|0}px ui-monospace,monospace`;
+  for(let y=0;y<W;y++)for(let x=0;x<W;x++){
+    if(fogOn && !seen[y][x]) continue;
+    if(map[y][x]===1){
+      const c=col[y][x];
+      if(c){ mc.fillStyle=`hsl(${hueOf(c)|0},75%,52%)`; mc.fillRect(x*s,y*s,s,s);
+             if(s>11){ mc.fillStyle='rgba(8,9,14,.85)'; mc.fillText(idStr(c), x*s+s/2, y*s+s/2+0.5); } }
+      else { mc.fillStyle='#3a3f4d'; mc.fillRect(x*s,y*s,s,s); }
+    } else { mc.fillStyle='#1a1d27'; mc.fillRect(x*s,y*s,s,s); }
+  }
+  mc.fillStyle='#5ad19a'; mc.beginPath(); mc.arc(goal.x*s,goal.y*s,s*0.30,0,6.28); mc.fill();
+  if(document.getElementById('trail').checked){ mc.fillStyle='rgba(90,209,154,.35)'; for(const p of trail) mc.fillRect(p.x*s-1,p.y*s-1,2,2); }
+  if(!document.getElementById('hide').checked){
+    mc.fillStyle='#fff'; mc.beginPath(); mc.arc(pos.x*s,pos.y*s,s*0.27,0,6.28); mc.fill();
+    mc.strokeStyle='#fff'; mc.lineWidth=2; mc.beginPath(); mc.moveTo(pos.x*s,pos.y*s); mc.lineTo((pos.x+Math.cos(dir)*0.8)*s,(pos.y+Math.sin(dir)*0.8)*s); mc.stroke();
+  }
+  const d=Math.hypot(goal.x-pos.x,goal.y-pos.y);
+  document.getElementById('hud').innerHTML=`steps <b>${steps}</b> · pos <b>(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})</b> · dist→goal <b>${d.toFixed(1)}</b> ${reached?'<span class="ok">· REACHED ✓</span>':''}`;
+  document.getElementById('hud2').innerHTML=`grid <b>${W}×${W}</b> · ids <b>${LBINS}</b> distinct ${AMB===0?'(unique)':'(reused)'}`;
+}
+const keys={};
+addEventListener('keydown',e=>{const k=e.key.toLowerCase(); if(['arrowup','arrowdown','arrowleft','arrowright'].includes(k)||['w','a','s','d'].includes(k)){keys[k]=true;e.preventDefault();}});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+function canMove(nx,ny){ return map[ny|0] && map[ny|0][nx|0]===0; }
+function step(){
+  const mv=0.08, rot=0.045; let moved=false;
+  if(keys['a']||keys['arrowleft']) {dir-=rot;moved=true;}
+  if(keys['d']||keys['arrowright']){dir+=rot;moved=true;}
+  let f=0; if(keys['w']||keys['arrowup'])f=mv; if(keys['s']||keys['arrowdown'])f=-mv;
+  if(f){ const nx=pos.x+Math.cos(dir)*f, ny=pos.y+Math.sin(dir)*f;
+    if(canMove(nx,pos.y))pos.x=nx; if(canMove(pos.x,ny))pos.y=ny; moved=true; }
+  if(moved){ steps++; reveal(); if(steps%2===0)trail.push({x:pos.x,y:pos.y});
+    if(Math.hypot(goal.x-pos.x,goal.y-pos.y)<0.5){ reached=true; setTimeout(()=>{reached=false;},900);
+      const open=[];for(let y=0;y<W;y++)for(let x=0;x<W;x++)if(map[y][x]===0)open.push([x,y]); const g=open[(Math.random()*open.length)|0]; goal={x:g[0]+0.5,y:g[1]+0.5}; } }
+}
+function loop(){ step(); render(); drawMM(); requestAnimationFrame(loop); }
+function apply(){ N=+S.value; LMD=+L.value/100; AMB=+A.value;
+  document.getElementById('vS').textContent=N; document.getElementById('vL').textContent=LMD.toFixed(2);
+  document.getElementById('vA').textContent=['unique','many','few','2 only'][AMB]; genMaze(N); }
+const S=document.getElementById('S'),L=document.getElementById('L'),A=document.getElementById('A');
+[S,L,A].forEach(el=>el.addEventListener('input',apply)); document.getElementById('regen').addEventListener('click',()=>genMaze(N));
+apply(); loop();
+</script>
+</body>
+</html>
