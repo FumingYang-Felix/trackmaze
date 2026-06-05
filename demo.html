@@ -62,7 +62,8 @@
         <label>landmark ambiguity <span id="vA">unique</span><input id="A" type="range" min="0" max="3" value="0"></label>
       </div>
       <div class="grp">
-        <label class="chk"><input id="hide" type="checkbox"> localization challenge (hide my dot)</label>
+        <label class="chk"><input id="belief" type="checkbox" checked> show belief + re-anchor (watch it drift)</label>
+        <label class="chk"><input id="hide" type="checkbox"> localization challenge (hide true dot)</label>
         <label class="chk"><input id="fog" type="checkbox" checked> fog of war (show only seen)</label>
         <label class="chk"><input id="trail" type="checkbox" checked> show trail</label>
       </div>
@@ -73,16 +74,17 @@
     </div>
   </div>
 
-  <p class="sub" style="margin-top:14px"><b>density</b> = how many anchors exist (set 0 → no re-anchoring → pure drift). <b>ambiguity</b> = how unique each anchor is — <b>unique</b>: seeing landmark <code>7</code> pins your location (clean correction); <b>higher</b>: ids repeat (aliasing) → you must disambiguate from your path (the hard, realistic loop-closure regime). Size = the OOD axis.</p>
+  <p class="sub" style="margin-top:14px"><span style="color:#e8954c">●</span> <b>amber dot</b> = the agent's <b>dead-reckoned belief</b> (integrates its own moves, with odometry noise). Walk around and watch it <b>drift</b> away from the true (white) dot — that gap <i>is</i> the latent drift. Standing next to a <b>unique</b> landmark snaps it back (<b>re-anchor</b> / loop closure). Now crank <b>ambiguity</b> so ids repeat → fewer unique anchors → the belief drifts free and never recovers (the failure mode). <b>density</b> 0 → no anchors → pure drift. Size = the OOD axis.</p>
 </div>
 
 <script>
 const FP=document.getElementById('fp'), fc=FP.getContext('2d');
 const MM=document.getElementById('mm'), mc=MM.getContext('2d');
 let N=8, LMD=0.15, AMB=0;
-let map, col, W, LBINS, seen, trail, pos, dir, goal, steps, reached;
+let map, col, W, LBINS, seen, trail, pos, dir, goal, steps, reached, bel, lastAnchor, uniqueIds;
 
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]];}return a;}
+function gauss(){return (Math.random()+Math.random()+Math.random()+Math.random()-2)*0.7;}  // ~N(0,1)
 function genMaze(n){
   W=2*n+1; map=Array.from({length:W},()=>Array(W).fill(1)); col=Array.from({length:W},()=>Array(W).fill(0));
   const vis=Array.from({length:n},()=>Array(n).fill(false)); const st=[[0,0]]; vis[0][0]=true; map[1][1]=0;
@@ -97,6 +99,9 @@ function genMaze(n){
   lm.forEach(([y,x],i)=>{ col[y][x] = 1 + (i % LBINS); });
   seen=Array.from({length:W},()=>Array(W).fill(false));
   trail=[]; pos={x:1.5,y:1.5}; dir=Math.random()*6.28; steps=0; reached=false;
+  bel={x:1.5,y:1.5,dir}; lastAnchor=0;                     // the agent's dead-reckoned belief (drifts)
+  const cnt={}; for(let y=0;y<W;y++)for(let x=0;x<W;x++){const c=col[y][x]; if(c)cnt[c]=(cnt[c]||0)+1;}
+  uniqueIds=new Set(Object.keys(cnt).filter(k=>cnt[k]===1).map(Number));   // ids that pin location (re-anchor)
   const open=[]; for(let y=0;y<W;y++)for(let x=0;x<W;x++) if(map[y][x]===0) open.push([x,y]);
   open.sort((a,b)=>((b[0]-1.5)**2+(b[1]-1.5)**2)-((a[0]-1.5)**2+(a[1]-1.5)**2));
   const gi=(Math.random()*Math.min(6,open.length))|0; goal={x:open[gi][0]+0.5, y:open[gi][1]+0.5};
@@ -148,12 +153,20 @@ function drawMM(){
   }
   mc.fillStyle='#5ad19a'; mc.beginPath(); mc.arc(goal.x*s,goal.y*s,s*0.30,0,6.28); mc.fill();
   if(document.getElementById('trail').checked){ mc.fillStyle='rgba(90,209,154,.35)'; for(const p of trail) mc.fillRect(p.x*s-1,p.y*s-1,2,2); }
-  if(!document.getElementById('hide').checked){
+  const belOn=document.getElementById('belief').checked, hideOn=document.getElementById('hide').checked;
+  if(belOn){                                            // amber = the agent's dead-reckoned BELIEF + drift vector
+    if(!hideOn){ mc.strokeStyle='rgba(232,149,76,.6)'; mc.lineWidth=1.5; mc.beginPath(); mc.moveTo(pos.x*s,pos.y*s); mc.lineTo(bel.x*s,bel.y*s); mc.stroke(); }
+    mc.fillStyle='#e8954c'; mc.beginPath(); mc.arc(bel.x*s,bel.y*s,s*0.24,0,6.28); mc.fill();
+    mc.strokeStyle='#e8954c'; mc.lineWidth=1.5; mc.beginPath(); mc.moveTo(bel.x*s,bel.y*s); mc.lineTo((bel.x+Math.cos(bel.dir)*0.8)*s,(bel.y+Math.sin(bel.dir)*0.8)*s); mc.stroke();
+  }
+  if(!hideOn){
     mc.fillStyle='#fff'; mc.beginPath(); mc.arc(pos.x*s,pos.y*s,s*0.27,0,6.28); mc.fill();
     mc.strokeStyle='#fff'; mc.lineWidth=2; mc.beginPath(); mc.moveTo(pos.x*s,pos.y*s); mc.lineTo((pos.x+Math.cos(dir)*0.8)*s,(pos.y+Math.sin(dir)*0.8)*s); mc.stroke();
   }
-  const d=Math.hypot(goal.x-pos.x,goal.y-pos.y);
-  document.getElementById('hud').innerHTML=`steps <b>${steps}</b> · pos <b>(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})</b> · dist→goal <b>${d.toFixed(1)}</b> ${reached?'<span class="ok">· REACHED ✓</span>':''}`;
+  const d=Math.hypot(goal.x-pos.x,goal.y-pos.y), drift=Math.hypot(pos.x-bel.x,pos.y-bel.y);
+  document.getElementById('hud').innerHTML=`steps <b>${steps}</b> · dist→goal <b>${d.toFixed(1)}</b>`+
+    (belOn?` · <span style="color:#e8954c">belief drift <b>${drift.toFixed(2)}</b> cells · since re-anchor <b>${steps-lastAnchor}</b></span>`:'')+
+    `${reached?' <span class="ok">· REACHED ✓</span>':''}`;
   document.getElementById('hud2').innerHTML=`grid <b>${W}×${W}</b> · ids <b>${LBINS}</b> distinct ${AMB===0?'(unique)':'(reused)'}`;
 }
 const keys={};
@@ -161,13 +174,20 @@ addEventListener('keydown',e=>{const k=e.key.toLowerCase(); if(['arrowup','arrow
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
 function canMove(nx,ny){ return map[ny|0] && map[ny|0][nx|0]===0; }
 function step(){
-  const mv=0.08, rot=0.045; let moved=false;
-  if(keys['a']||keys['arrowleft']) {dir-=rot;moved=true;}
-  if(keys['d']||keys['arrowright']){dir+=rot;moved=true;}
+  const mv=0.08, rot=0.045; let moved=false, drot=0;
+  if(keys['a']||keys['arrowleft']) {dir-=rot;drot-=rot;moved=true;}
+  if(keys['d']||keys['arrowright']){dir+=rot;drot+=rot;moved=true;}
   let f=0; if(keys['w']||keys['arrowup'])f=mv; if(keys['s']||keys['arrowdown'])f=-mv;
   if(f){ const nx=pos.x+Math.cos(dir)*f, ny=pos.y+Math.sin(dir)*f;
     if(canMove(nx,pos.y))pos.x=nx; if(canMove(pos.x,ny))pos.y=ny; moved=true; }
   if(moved){ steps++; reveal(); if(steps%2===0)trail.push({x:pos.x,y:pos.y});
+    // belief = dead-reckon the SAME commands with odometry noise, no collision -> it drifts from truth
+    bel.dir += drot + gauss()*0.020;
+    if(f){ bel.x += Math.cos(bel.dir)*f + gauss()*0.012; bel.y += Math.sin(bel.dir)*f + gauss()*0.012; }
+    // re-anchor: standing next to a UNIQUE landmark snaps the belief back to truth (loop closure)
+    if(document.getElementById('belief').checked){ const cx=pos.x|0, cy=pos.y|0;
+      for(const [dx,dy] of [[0,1],[0,-1],[1,0],[-1,0]]){ const r=col[cy+dy], c=r&&r[cx+dx];
+        if(c && uniqueIds.has(c)){ bel.x=pos.x; bel.y=pos.y; bel.dir=dir; lastAnchor=steps; break; } } }
     if(Math.hypot(goal.x-pos.x,goal.y-pos.y)<0.5){ reached=true; setTimeout(()=>{reached=false;},900);
       const open=[];for(let y=0;y<W;y++)for(let x=0;x<W;x++)if(map[y][x]===0)open.push([x,y]); const g=open[(Math.random()*open.length)|0]; goal={x:g[0]+0.5,y:g[1]+0.5}; } }
 }
