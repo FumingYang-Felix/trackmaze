@@ -8,15 +8,17 @@
   :root{ --bg:#0e0f13; --panel:#16181f; --ink:#e8eaf0; --mut:#9aa3b2; --acc:#5ad19a; }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
-  .wrap{max-width:1060px;margin:0 auto;padding:16px}
+  .wrap{max-width:1000px;margin:0 auto;padding:16px}
   h1{font-size:18px;margin:0 0 2px} .sub{color:var(--mut);margin:0 0 14px;font-size:13px}
-  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
   .card{background:var(--panel);border:1px solid #232634;border-radius:10px;padding:10px}
   canvas{display:block;border-radius:6px;background:#000;image-rendering:pixelated}
   .lbl{color:var(--mut);font-size:12px;margin:2px 0 6px;text-transform:uppercase;letter-spacing:.05em}
-  .ctl{display:flex;flex-direction:column;gap:10px;min-width:230px}
-  .ctl label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;color:var(--mut)}
-  input[type=range]{width:120px} button{background:#222634;color:var(--ink);border:1px solid #313646;border-radius:7px;padding:7px 10px;cursor:pointer}
+  .controls{display:flex;gap:22px;flex-wrap:wrap;align-items:center;margin-top:6px}
+  .controls .grp{display:flex;flex-direction:column;gap:8px}
+  .controls label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;color:var(--mut)}
+  .controls .chk{justify-content:flex-start;gap:8px}
+  input[type=range]{width:130px} button{background:#222634;color:var(--ink);border:1px solid #313646;border-radius:7px;padding:7px 12px;cursor:pointer}
   button:hover{background:#2b3142}
   .hud{font-variant-numeric:tabular-nums;color:var(--mut);font-size:12px;margin-top:8px}
   .hud b{color:var(--ink)} .ok{color:var(--acc);font-weight:600}
@@ -35,7 +37,7 @@
       <div class="lbl">Agent view (egocentric · 2.5D raycast)</div>
       <canvas id="fp" width="520" height="340"></canvas>
       <div class="keys" style="margin-top:8px"><kbd>W</kbd>/<kbd>↑</kbd> forward · <kbd>S</kbd>/<kbd>↓</kbd> back · <kbd>A</kbd>/<kbd>←</kbd> turn left · <kbd>D</kbd>/<kbd>→</kbd> turn right · reach the <span style="color:var(--acc)">green pillar</span></div>
-      <div class="legend"><span><span class="sw" style="background:#5ad19a"></span>goal</span><span><span class="sw" style="background:#8a8f9c"></span>plain wall (no info)</span><span>colored wall = <b>landmark</b> (re-anchor). its hue/id is its identity — at low ambiguity each is <b>unique</b>.</span></div>
+      <div class="legend"><span><span class="sw" style="background:#5ad19a"></span>goal</span><span><span class="sw" style="background:#8a8f9c"></span>plain wall (no info)</span><span>colored wall = <b>landmark</b> (re-anchor); at low ambiguity each is <b>unique</b>.</span></div>
     </div>
 
     <div class="card">
@@ -43,20 +45,28 @@
       <canvas id="mm" width="340" height="340"></canvas>
       <div class="hud" id="hud"></div>
     </div>
+  </div>
 
-    <div class="card ctl">
-      <div class="lbl">Controllable difficulty</div>
-      <label>maze size <span id="vS">8</span><input id="S" type="range" min="5" max="20" value="8"></label>
-      <label>landmark density <span id="vL">0.15</span><input id="L" type="range" min="0" max="40" value="15"></label>
-      <label>landmark ambiguity <span id="vA">unique</span><input id="A" type="range" min="0" max="3" value="0"></label>
-      <button id="regen">⟳ new maze</button>
-      <div class="lbl" style="margin-top:6px">probes / tasks</div>
-      <label style="justify-content:flex-start;gap:8px"><input id="hide" type="checkbox"> localization challenge (hide my dot)</label>
-      <label style="justify-content:flex-start;gap:8px"><input id="fog" type="checkbox" checked> fog of war (show only seen)</label>
-      <label style="justify-content:flex-start;gap:8px"><input id="trail" type="checkbox" checked> show trail</label>
-      <div class="hud" id="hud2"></div>
+  <div class="card" style="margin-top:16px">
+    <div class="lbl">Controllable difficulty &nbsp;/&nbsp; probes</div>
+    <div class="controls">
+      <div class="grp">
+        <label>maze size <span id="vS">8</span><input id="S" type="range" min="5" max="20" value="8"></label>
+        <label>landmark density <span id="vL">0.15</span><input id="L" type="range" min="0" max="40" value="15"></label>
+        <label>landmark ambiguity <span id="vA">unique</span><input id="A" type="range" min="0" max="3" value="0"></label>
+      </div>
+      <div class="grp">
+        <label class="chk"><input id="hide" type="checkbox"> localization challenge (hide my dot)</label>
+        <label class="chk"><input id="fog" type="checkbox" checked> fog of war (show only seen)</label>
+        <label class="chk"><input id="trail" type="checkbox" checked> show trail</label>
+      </div>
+      <div class="grp">
+        <button id="regen">⟳ new maze</button>
+        <div class="hud" id="hud2" style="margin-top:2px"></div>
+      </div>
     </div>
   </div>
+
   <p class="sub" style="margin-top:14px"><b>density</b> = how many anchors exist (set 0 → no re-anchoring → pure drift). <b>ambiguity</b> = how unique each anchor is — <b>unique</b>: seeing landmark <code>7</code> pins your location (clean correction); <b>higher</b>: ids repeat (aliasing) → you must disambiguate from your path (the hard, realistic loop-closure regime). Size = the OOD axis.</p>
 </div>
 
@@ -76,11 +86,9 @@ function genMaze(n){
     if(nb.length){const [nx,ny,dx,dy]=nb[0]; map[2*cy+1+dy][2*cx+1+dx]=0; map[2*ny+1][2*nx+1]=0; vis[ny][nx]=true; st.push([nx,ny]);}
     else st.pop();
   }
-  // landmarks: collect wall cells, then assign each an id from a vocabulary of size LBINS.
-  // ambiguity=0 -> LBINS = #landmarks (every landmark UNIQUE). higher -> small vocab -> ids repeat (aliasing).
   const lm=[]; for(let y=0;y<W;y++)for(let x=0;x<W;x++) if(map[y][x]===1 && Math.random()<LMD) lm.push([y,x]);
   shuffle(lm); LBINS = AMB===0 ? Math.max(1,lm.length) : Math.min(lm.length,[0,12,5,2][AMB]);
-  lm.forEach(([y,x],i)=>{ col[y][x] = 1 + (i % LBINS); });   // col-1 = landmark id in [0,LBINS)
+  lm.forEach(([y,x],i)=>{ col[y][x] = 1 + (i % LBINS); });
   seen=Array.from({length:W},()=>Array(W).fill(false));
   trail=[]; pos={x:1.5,y:1.5}; dir=Math.random()*6.28; steps=0; reached=false;
   const open=[]; for(let y=0;y<W;y++)for(let x=0;x<W;x++) if(map[y][x]===0) open.push([x,y]);
@@ -89,7 +97,7 @@ function genMaze(n){
   reveal();
 }
 function reveal(){ const R=2.5; for(let y=Math.max(0,(pos.y-R)|0);y<Math.min(W,pos.y+R+1);y++)for(let x=Math.max(0,(pos.x-R)|0);x<Math.min(W,pos.x+R+1);x++) if((x+.5-pos.x)**2+(y+.5-pos.y)**2<R*R) seen[y][x]=true; }
-function hueOf(c){ return ((c-1)/Math.max(1,LBINS))*360; }                 // landmark id -> hue
+function hueOf(c){ return ((c-1)/Math.max(1,LBINS))*360; }
 function idStr(c){ return (c-1).toString(36).toUpperCase(); }
 
 const FOV=Math.PI/2.6, H=FP.height, Wc=FP.width, COLW=2, NC=Wc/COLW;
@@ -140,7 +148,7 @@ function drawMM(){
   }
   const d=Math.hypot(goal.x-pos.x,goal.y-pos.y);
   document.getElementById('hud').innerHTML=`steps <b>${steps}</b> · pos <b>(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})</b> · dist→goal <b>${d.toFixed(1)}</b> ${reached?'<span class="ok">· REACHED ✓</span>':''}`;
-  document.getElementById('hud2').innerHTML=`grid <b>${W}×${W}</b> · landmark ids <b>${LBINS}</b> distinct ${AMB===0?'(all unique)':'(reused → aliasing)'}`;
+  document.getElementById('hud2').innerHTML=`grid <b>${W}×${W}</b> · ids <b>${LBINS}</b> distinct ${AMB===0?'(unique)':'(reused)'}`;
 }
 const keys={};
 addEventListener('keydown',e=>{const k=e.key.toLowerCase(); if(['arrowup','arrowdown','arrowleft','arrowright'].includes(k)||['w','a','s','d'].includes(k)){keys[k]=true;e.preventDefault();}});
