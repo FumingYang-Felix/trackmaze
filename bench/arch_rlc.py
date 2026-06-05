@@ -31,10 +31,16 @@ class RLCTracker(nn.Module):
         self.gru = nn.GRU(K+4, d, num_layers=2, batch_first=True)
         self.pose = nn.Linear(d, 2)
         self.lm_emb = nn.Embedding(V+1, 16)
-        self.view = nn.Sequential(nn.Linear(K + K*16, d), nn.GELU(), nn.Linear(d, d))
+        self.view = nn.Sequential(nn.Linear(K + K*16, d), nn.GELU(), nn.Linear(d, d))     # absolute-id place code
+        self.view_rel = nn.Sequential(nn.Linear(3*K, d), nn.GELU(), nn.Linear(d, d))      # permutation-INVARIANT place code
         self.conf = nn.Sequential(nn.Linear(5, 32), nn.GELU(), nn.Linear(32, 1))   # 5 features (basic zero-pads last 2)
-        self.use_memory = True
+        self.use_memory = True; self.relational = False
     def encode_view(self, rays, lm_id):
+        if self.relational:
+            has = (lm_id >= 0).float()                                            # (B,T,K) ray sees a landmark
+            same = (((lm_id.unsqueeze(-1) == lm_id.unsqueeze(-2)) &
+                     (lm_id.unsqueeze(-1) >= 0)).float().sum(-1) - has) / self.K  # #other rays with SAME id (id-invariant)
+            return F.normalize(self.view_rel(torch.cat([rays, has, same], -1)), dim=-1)
         e = self.lm_emb(lm_id).flatten(-2)
         return F.normalize(self.view(torch.cat([rays, e], -1)), dim=-1)
     def forward(self, x, gt_disp=None, return_aux=False):

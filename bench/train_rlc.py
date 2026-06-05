@@ -57,7 +57,8 @@ def train_two_stage(model, x, y, cells, dev, epochs_a=50, epochs_b=60, bs=32, lr
     """Decouple: Stage A trains the place matcher ALONE with contrastive (sharp embeddings, no objective
     conflict); freeze it; Stage B trains the integrator + correction (position MSE + GT-bound confidence)."""
     model.to(dev); x, y, cells = x.to(dev), y.to(dev), cells.to(dev); E = x.shape[0]
-    viewp = list(model.lm_emb.parameters()) + list(model.view.parameters())
+    viewp = list(model.view_rel.parameters()) if getattr(model, "relational", False) \
+        else list(model.lm_emb.parameters()) + list(model.view.parameters())
     optA = torch.optim.Adam(viewp, lr=lr)
     for ep in range(epochs_a):                                   # Stage A: sharp place embeddings
         perm = torch.randperm(E); lc = None
@@ -92,12 +93,14 @@ def main():
     ap.add_argument("--lam", type=float, default=0.5)
     ap.add_argument("--retr", default="best"); ap.add_argument("--update", default="snap")
     ap.add_argument("--feats", default="basic"); ap.add_argument("--gain", type=float, default=1.0)
+    ap.add_argument("--relational", action="store_true")   # permutation-invariant place key (no absolute id)
     a = ap.parse_args(); torch.manual_seed(a.seed); np.random.seed(a.seed); dev = a.device
-    cfg = f"retr={a.retr} update={a.update} feats={a.feats} gain={a.gain}"
+    cfg = f"retr={a.retr} update={a.update} feats={a.feats} gain={a.gain} relational={a.relational}"
 
     tr = cached(f"train_n{TRAIN_N}_T{TRAIN_T}_a{AMB}", n=TRAIN_N, n_eps=TRAIN_EPS, T=TRAIN_T, ambiguity=AMB, seed=1)
     x, y = encode(tr); cells = cell_ids(tr["pos"]); din = x.shape[2]
     model = RLCTracker(din, retr=a.retr, update=a.update, feats=a.feats, gain=a.gain)
+    model.relational = a.relational
     train_two_stage(model, x, y, cells, dev, epochs_a=a.epochs, epochs_b=a.epochs)
 
     bens, ons, offs = [], [], []
