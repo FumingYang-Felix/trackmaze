@@ -16,9 +16,10 @@ import numpy as np
 
 DIRS = [(0,1),(0,-1),(1,0),(-1,0)]
 
-def gen_maze(n, lm_density=0.15, ambiguity=0, rng=None):
+def gen_maze(n, lm_density=0.15, ambiguity=0, rng=None, loop=0.0):
     """Randomized-DFS maze on an n x n cell grid -> (2n+1) wall grid + landmark-id grid.
-    Returns wall (1=wall,0=open), col (0=plain wall / non-wall; >0 = landmark id+1), LBINS (vocab)."""
+    loop>0 BRAIDS the maze: opens that fraction of interior walls between adjacent cells, creating CYCLES
+    (so genuine loop-closures exist, not just backtracking). Returns wall, col, LBINS."""
     rng = rng if rng is not None else np.random.default_rng()
     W = 2*n+1
     wall = np.ones((W,W), dtype=np.int8); col = np.zeros((W,W), dtype=np.int32)
@@ -31,6 +32,14 @@ def gen_maze(n, lm_density=0.15, ambiguity=0, rng=None):
                 wall[2*cy+1+dy, 2*cx+1+dx]=0; wall[2*ny+1, 2*nx+1]=0
                 vis[ny,nx]=True; st.append((nx,ny)); moved=True; break
         if not moved: st.pop()
+    if loop > 0:                                            # braid: open some interior walls -> cycles
+        for cy in range(n):
+            for cx in range(n):
+                for dx,dy in ((1,0),(0,1)):
+                    nx,ny = cx+dx, cy+dy
+                    if 0<=nx<n and 0<=ny<n:
+                        wy,wx = 2*cy+1+dy, 2*cx+1+dx
+                        if wall[wy,wx] == 1 and rng.random() < loop: wall[wy,wx] = 0
     ys,xs = np.where(wall==1); pick = rng.random(len(ys)) < lm_density
     lm = list(zip(ys[pick].tolist(), xs[pick].tolist())); rng.shuffle(lm)
     LBINS = max(1,len(lm)) if ambiguity==0 else max(1, min(len(lm), [0,12,5,2][ambiguity]))
@@ -64,7 +73,7 @@ class TrackMazeEnv:
     """Egocentric maze env. obs = {rays(K), ray_lm(K), last_action(4), heading(2)}; gt exported per step."""
     N_ACT = 4   # 0 forward, 1 back, 2 turn-left, 3 turn-right
     def __init__(self, n=8, lm_density=0.15, ambiguity=0, seed=0, K=16, max_steps=300,
-                 action_noise=0.03, rot_noise=0.09, reanchor_gap=15):
+                 action_noise=0.03, rot_noise=0.09, reanchor_gap=15, loop=0.0):
         # action_noise: stdev of translation odometry noise (cells). rot_noise: stdev of PERSISTENT
         # per-step heading drift (rad) -> the latent that compounds. Neither is observable by the agent;
         # this is the drift it must correct by recognizing landmarks. Set both 0 for a noiseless oracle.
@@ -73,7 +82,7 @@ class TrackMazeEnv:
         self.n,self.K,self.max_steps,self.reanchor_gap = n,K,max_steps,reanchor_gap
         self.action_noise, self.rot_noise = action_noise, rot_noise
         self.rng = np.random.default_rng(seed)
-        self.wall, self.col, self.LBINS = gen_maze(n, lm_density, ambiguity, self.rng)
+        self.wall, self.col, self.LBINS = gen_maze(n, lm_density, ambiguity, self.rng, loop=loop)
         ids = (self.col[self.col>0]-1).tolist(); cnt = Counter(ids)
         self.unique_ids = set(k for k,v in cnt.items() if v==1)   # landmarks that pin location (informative re-anchor)
         self.reset()

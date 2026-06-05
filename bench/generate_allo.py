@@ -36,12 +36,12 @@ def omni(wall, col, px, py, ang):
         g[i], l[i] = cast(wall, col, px, py, ang + 2*math.pi*i/KO)
     return g, l
 
-def gen_allo(n, n_eps, T, ambiguity=1, seed=0, canon="true", action_noise=0.03, rot_noise=0.09):
+def gen_allo(n, n_eps, T, ambiguity=1, seed=0, canon="true", action_noise=0.03, rot_noise=0.09, loop=0.0):
     rng = np.random.default_rng(seed)
     CG, CL, ACT, POS, DISP, CELL, RA = [], [], [], [], [], [], []
     for e in range(n_eps):
         env = TrackMazeEnv(n=n, ambiguity=ambiguity, seed=seed*100000+e, max_steps=T+2,
-                           action_noise=action_noise, rot_noise=rot_noise)
+                           action_noise=action_noise, rot_noise=rot_noise, loop=loop)
         obs = env.reset(); ang0 = env.ang; cmd = 0.0          # command-integrated heading-from-start
         cg, cl, ac, po, ra = [], [], [], [np.array([env.px, env.py], np.float32)], []
         for t in range(T):

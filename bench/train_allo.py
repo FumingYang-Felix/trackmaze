@@ -55,17 +55,26 @@ def final_err(model, ds, dev, use_memory):
     return per_step_error(mu, ds["disp"])[:, -1].mean()
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(); ap.add_argument("--canon", default="true"); ap.add_argument("--seed", type=int, default=0)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--canon", default="cmd"); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--epochs", type=int, default=80); ap.add_argument("--device", default="cpu")
+    ap.add_argument("--loop", type=float, default=0.0); ap.add_argument("--rot_noise", type=float, default=0.09)
+    ap.add_argument("--tscale", type=float, default=1.0); ap.add_argument("--train_n", type=int, default=6)
+    ap.add_argument("--ema_gain", type=float, default=0.3); ap.add_argument("--store_gap", type=int, default=3)
+    ap.add_argument("--mask_recent", type=int, default=12); ap.add_argument("--topk", type=int, default=3)
     a = ap.parse_args(); torch.manual_seed(a.seed); np.random.seed(a.seed); dev = a.device
-    tr = gen_allo(n=6, n_eps=200, T=160, ambiguity=1, seed=1, canon=a.canon)
+    G = dict(ambiguity=1, canon=a.canon, rot_noise=a.rot_noise, loop=a.loop)
+    tr = gen_allo(n=a.train_n, n_eps=200, T=int(160*a.tscale), seed=1, **G)
     geo, lm, oh, y, cells = tens(tr)
-    model = AlloTracker(); train(model, geo, lm, oh, y, cells, dev, a.epochs, a.epochs)
-    print(f"\n[AlloTracker canon={a.canon} seed{a.seed}] OFF=integrator, ON=allo place-lock correction")
-    print(f"{'size':>6}  {'OFF':>7}  {'ON':>7}  {'benefit':>8}")
-    bs = []
-    for n, T in [(6,144),(9,216),(12,288),(16,384),(20,480),(24,576)]:
-        te = gen_allo(n=n, n_eps=60, T=T, ambiguity=1, seed=7, canon=a.canon)
-        off = final_err(model, te, dev, False); on = final_err(model, te, dev, True); bs.append(off-on)
-        print(f"{('n='+str(n)):>6}  {off:7.2f}  {on:7.2f}  {off-on:+8.2f}")
-    print(f"RESULT canon={a.canon} seed={a.seed} mean_benefit={np.mean(bs):+.3f}")
+    model = AlloTracker(store_gap=a.store_gap, mask_recent=a.mask_recent, ema_gain=a.ema_gain, topk=a.topk)
+    train(model, geo, lm, oh, y, cells, dev, a.epochs, a.epochs)
+    bs, large = [], []
+    for n in (6, 12, 20, 28):
+        te = gen_allo(n=n, n_eps=60, T=int(24*n*a.tscale), seed=7, **G)
+        off = final_err(model, te, dev, False); on = final_err(model, te, dev, True)
+        bs.append(off - on)
+        if n >= 20: large.append(off - on)
+    cfg = (f"canon={a.canon} loop={a.loop} rot={a.rot_noise} tscale={a.tscale} trainN={a.train_n} "
+           f"ema={a.ema_gain} gap={a.store_gap} recent={a.mask_recent} topk={a.topk} seed={a.seed}")
+    print(f"RESULT [{cfg}] LARGE_benefit={np.mean(large):+.3f} mean={np.mean(bs):+.3f} "
+          f"per_size={[round(b,2) for b in bs]}")

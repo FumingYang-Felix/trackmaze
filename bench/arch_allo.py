@@ -10,9 +10,10 @@ import torch, torch.nn as nn, torch.nn.functional as F
 
 KO = 32
 class AlloTracker(nn.Module):
-    def __init__(self, d=128, store_gap=3, mask_recent=12, temp=0.07, tol=0.6):
+    def __init__(self, d=128, store_gap=3, mask_recent=12, temp=0.07, tol=0.6, ema_gain=0.3, topk=3):
         super().__init__()
         self.store_gap, self.mask_recent, self.temp, self.tol, self.d = store_gap, mask_recent, temp, tol, d
+        self.ema_gain, self.topk = ema_gain, topk
         self.gru = nn.GRU(KO+4, d, num_layers=2, batch_first=True); self.pose = nn.Linear(d, 2)
         self.view = nn.Sequential(nn.Linear(2*KO, d), nn.GELU(), nn.Linear(d, d))
         self.conf = nn.Sequential(nn.Linear(5, 32), nn.GELU(), nn.Linear(32, 1))
@@ -32,7 +33,7 @@ class AlloTracker(nn.Module):
             while n_readable < len(times) and times[n_readable] <= t - self.mask_recent: n_readable += 1
             if n_readable > 0:
                 Kmem = torch.stack(keys[:n_readable], 1); Vmem = torch.stack(vals[:n_readable], 1)
-                cos = torch.bmm(Kmem, q.unsqueeze(-1)).squeeze(-1); S = cos.shape[1]; k = min(3, S)
+                cos = torch.bmm(Kmem, q.unsqueeze(-1)).squeeze(-1); S = cos.shape[1]; k = min(self.topk, S)
                 topv, topi = torch.topk(cos, k, dim=1)
                 Vtop = torch.gather(Vmem, 1, topi.unsqueeze(-1).expand(-1, -1, 2))
                 attn = torch.softmax(cos / self.temp, dim=1)
@@ -42,7 +43,7 @@ class AlloTracker(nn.Module):
                 f = torch.stack([topv[:, 0], gap, attn.max(1).values, -spread,
                                  torch.zeros(B, device=dev)], -1)
                 g = torch.sigmoid(self.conf(f)).squeeze(-1)
-                offset = offset + 0.3 * g.unsqueeze(-1) * ((retrieved - mu_prior[:, t]) - offset)
+                offset = offset + self.ema_gain * g.unsqueeze(-1) * ((retrieved - mu_prior[:, t]) - offset)
                 if gt_disp is not None:
                     label = (torch.norm(retrieved - gt_disp[:, t], dim=-1) < self.tol).float()
                     g_list.append(g.clamp(1e-6, 1-1e-6)); lbl_list.append(label)
