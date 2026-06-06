@@ -58,48 +58,53 @@ class MGM(nn.Module):
             self.key = nn.Linear(d, dk); self.qry = nn.Linear(d, dk)        # learned key/query projections
             self.wimp = nn.Sequential(nn.Linear(h, 16), nn.ReLU(), nn.Linear(16, 1))  # learned write importance (R3)
 
+    def init_state(self, B, dev):
+        return dict(h=torch.zeros(B, self.h, device=dev), mu=torch.zeros(B, 2, device=dev),
+                    mem_p=torch.zeros(B, self.M, self.d, device=dev),
+                    mem_k=torch.zeros(B, self.M, self.dk, device=dev) if self.use_kv else None,
+                    mem_mu=torch.zeros(B, self.M, 2, device=dev),
+                    mem_occ=torch.zeros(B, self.M, device=dev), mem_imp=torch.zeros(B, self.M, device=dev), wptr=0)
+
+    def step(self, geo_t, lm_t, motion_t, s):
+        """One online timestep. Mutates state dict s; returns mu (B,2)."""
+        tau2 = (self.log_tau.exp() ** 2) + 1e-3
+        p = self.enc(geo_t, lm_t)
+        s["h"] = self.gru(torch.cat([p, motion_t], -1), s["h"])
+        mu = s["mu"] + motion_t + self.to_mu(s["h"])
+        if self.use_mem:
+            if self.use_kv:
+                content = (s["mem_k"] * self.qry(p).unsqueeze(1)).sum(-1) / (self.dk ** 0.5)
+            else:
+                content = (s["mem_p"] * p.unsqueeze(1)).sum(-1) / (self.d ** 0.5)
+            for _ in range(self.n_corr):
+                if self.use_grid:
+                    diff = s["mem_mu"] - mu.unsqueeze(1)
+                    ph = 2 * 3.141592653589793 * diff.unsqueeze(-1) / self.periods.view(1, 1, 1, -1)
+                    gatev = torch.cos(ph).mean((-1, -2)) * 4.0
+                else:
+                    gatev = -((s["mem_mu"] - mu.unsqueeze(1)) ** 2).sum(-1) / tau2
+                w = torch.softmax(content + gatev + s["mem_imp"] + (s["mem_occ"] - 1.0) * 1e4, 1)
+                read_mu = (w.unsqueeze(-1) * s["mem_mu"]).sum(1)
+                read_p = (w.unsqueeze(-1) * s["mem_p"]).sum(1)
+                conf = torch.sigmoid(self.gate(torch.cat([s["h"], read_p, read_mu - mu], -1)))
+                mu = mu + conf * (read_mu - mu)
+            wp = s["wptr"]
+            # clone before writing: the read above saves these buffers for backward; in-place would corrupt it
+            s["mem_p"] = s["mem_p"].clone(); s["mem_mu"] = s["mem_mu"].clone()
+            s["mem_occ"] = s["mem_occ"].clone(); s["mem_imp"] = s["mem_imp"].clone()
+            s["mem_p"][:, wp] = p.detach(); s["mem_mu"][:, wp] = mu.detach(); s["mem_occ"][:, wp] = 1.0
+            if self.use_kv:
+                s["mem_k"] = s["mem_k"].clone(); s["mem_k"][:, wp] = self.key(p).detach()
+                s["mem_imp"][:, wp] = torch.log(torch.sigmoid(self.wimp(s["h"])).squeeze(-1) + 1e-4).detach()
+            s["wptr"] = (wp + 1) % self.M
+        s["mu"] = mu
+        return mu
+
     def forward(self, geo, lm, motion):
         B, T, K = geo.shape
-        dev = geo.device
-        h = torch.zeros(B, self.h, device=dev)
-        mu = torch.zeros(B, 2, device=dev)
-        mem_p = torch.zeros(B, self.M, self.d, device=dev)
-        mem_k = torch.zeros(B, self.M, self.dk, device=dev) if self.use_kv else None
-        mem_mu = torch.zeros(B, self.M, 2, device=dev)
-        mem_occ = torch.zeros(B, self.M, device=dev)             # occupancy (0 empty / 1 written) for masking
-        mem_imp = torch.zeros(B, self.M, device=dev)             # learned write importance -> additive log bias
-        wptr = 0
-        tau2 = (self.log_tau.exp() ** 2) + 1e-3
-        outs = []
+        s = self.init_state(B, geo.device); outs = []
         for t in range(T):
-            p = self.enc(geo[:, t], lm[:, t])                       # (B,d) place code
-            h = self.gru(torch.cat([p, motion[:, t]], -1), h)
-            mu = mu + motion[:, t] + self.to_mu(h)                  # integrate odometry + learned residual
-            if self.use_mem:
-                if self.use_kv:
-                    q = self.qry(p)                                            # (B,dk)
-                    content = (mem_k * q.unsqueeze(1)).sum(-1) / (self.dk ** 0.5)
-                else:
-                    content = (mem_p * p.unsqueeze(1)).sum(-1) / (self.d ** 0.5)
-                for _ in range(self.n_corr):                                  # iterative loop-closure correction
-                    if self.use_grid:
-                        diff = mem_mu - mu.unsqueeze(1)
-                        ph = 2 * 3.141592653589793 * diff.unsqueeze(-1) / self.periods.view(1, 1, 1, -1)
-                        gatev = torch.cos(ph).mean((-1, -2)) * 4.0
-                    else:
-                        gatev = -((mem_mu - mu.unsqueeze(1)) ** 2).sum(-1) / tau2
-                    w = torch.softmax(content + gatev + mem_imp + (mem_occ - 1.0) * 1e4, 1)
-                    read_mu = (w.unsqueeze(-1) * mem_mu).sum(1)
-                    read_p = (w.unsqueeze(-1) * mem_p).sum(1)
-                    conf = torch.sigmoid(self.gate(torch.cat([h, read_p, read_mu - mu], -1)))
-                    mu = mu + conf * (read_mu - mu)
-                mem_p = mem_p.clone(); mem_mu = mem_mu.clone(); mem_occ = mem_occ.clone(); mem_imp = mem_imp.clone()
-                mem_p[:, wptr] = p.detach(); mem_mu[:, wptr] = mu.detach(); mem_occ[:, wptr] = 1.0
-                if self.use_kv:
-                    mem_k = mem_k.clone(); mem_k[:, wptr] = self.key(p).detach()
-                    mem_imp[:, wptr] = torch.log(torch.sigmoid(self.wimp(h)).squeeze(-1) + 1e-4).detach()  # learned importance
-                wptr = (wptr + 1) % self.M
-            outs.append(mu)
+            outs.append(self.step(geo[:, t], lm[:, t], motion[:, t], s))
         return torch.stack(outs, 1)                                            # (B,T,2)
 
 
