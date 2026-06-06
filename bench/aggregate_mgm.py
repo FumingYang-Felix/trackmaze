@@ -1,17 +1,19 @@
 """Aggregate results_<arch>_<seed>.txt (lines: arch seed n local global) -> mean+/-std over seeds per
 (arch, size). Prints LOCAL and GLOBAL OOD-error tables and the size-growth per arch."""
-import glob, numpy as np
+import glob, sys, numpy as np
 from collections import defaultdict
 
+pattern = sys.argv[1] if len(sys.argv) > 1 else "results_*.txt"
 rows = defaultdict(lambda: defaultdict(list))   # arch -> n -> [(local,global), ...]
-for f in glob.glob("results_*.txt"):
+for f in glob.glob(pattern):
     for line in open(f):
         p = line.split()
         if len(p) == 5:
             arch, seed, n, lo, gl = p
             rows[arch][int(n)].append((float(lo), float(gl)))
 
-archs = [a for a in ["mgm", "mgm_norot", "mgm_nomem", "gru", "transformer"] if a in rows]
+order = ["mgm", "mgm_norot", "mgm_grid", "mgm_grid_M128", "mgm_nomem", "gru", "transformer"]
+archs = [a for a in order if a in rows] + [a for a in rows if a not in order]
 sizes = sorted({n for a in rows for n in rows[a]})
 
 def cell(arch, n, idx):
