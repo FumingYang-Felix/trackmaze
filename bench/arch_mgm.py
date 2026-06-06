@@ -32,10 +32,21 @@ class RotInvEnc(nn.Module):
         return self.head(z)                           # (B,d)
 
 
+class PlainEnc(nn.Module):
+    """Non-rotation-invariant MLP encoder (ablation): flattens the 64-d view -> place code (can memorize
+    heading/landmark configs -> the phase-1 trap)."""
+    def __init__(self, din=64, d=64):
+        super().__init__(); self.net = nn.Sequential(nn.Linear(din, 128), nn.ReLU(), nn.Linear(128, 128), nn.ReLU(), nn.Linear(128, d))
+
+    def forward(self, geo, lm):
+        return self.net(torch.cat([geo, lm], -1))
+
+
 class MGM(nn.Module):
-    def __init__(self, h=128, d=64, M=64, tau=2.0):
+    def __init__(self, h=128, d=64, M=64, tau=2.0, use_rot=True, use_mem=True):
         super().__init__()
-        self.enc = RotInvEnc(d=d)
+        self.use_mem = use_mem
+        self.enc = RotInvEnc(d=d) if use_rot else PlainEnc(d=d)
         self.gru = nn.GRUCell(d + 2, h)
         self.to_mu = nn.Linear(h, 2)                  # residual position head (refines integrated mu)
         self.gate = nn.Sequential(nn.Linear(h + d + 2, 32), nn.ReLU(), nn.Linear(32, 1))  # loop-closure confidence
@@ -57,20 +68,20 @@ class MGM(nn.Module):
             p = self.enc(geo[:, t], lm[:, t])                       # (B,d) heading-free place code
             h = self.gru(torch.cat([p, motion[:, t]], -1), h)
             mu = mu + motion[:, t] + self.to_mu(h)                  # integrate odometry + learned residual
-            # motion-gated memory read
-            content = (mem_p * p.unsqueeze(1)).sum(-1) / (self.d ** 0.5)        # (B,M)
-            gatev = -((mem_mu - mu.unsqueeze(1)) ** 2).sum(-1) / tau2           # motion-reachability gate
-            logits = content + gatev + (mem_mask - 1.0) * 1e4                   # mask empty slots
-            w = torch.softmax(logits, 1)                                       # (B,M)
-            read_mu = (w.unsqueeze(-1) * mem_mu).sum(1)                         # retrieved position
-            read_p = (w.unsqueeze(-1) * mem_p).sum(1)                          # retrieved place code
-            conf = torch.sigmoid(self.gate(torch.cat([h, read_p, read_mu - mu], -1)))  # (B,1)
-            mu = mu + conf * (read_mu - mu)                                    # loop-closure correction
+            if self.use_mem:
+                # motion-gated memory read
+                content = (mem_p * p.unsqueeze(1)).sum(-1) / (self.d ** 0.5)    # (B,M)
+                gatev = -((mem_mu - mu.unsqueeze(1)) ** 2).sum(-1) / tau2       # motion-reachability gate
+                logits = content + gatev + (mem_mask - 1.0) * 1e4              # mask empty slots
+                w = torch.softmax(logits, 1)                                   # (B,M)
+                read_mu = (w.unsqueeze(-1) * mem_mu).sum(1)                     # retrieved position
+                read_p = (w.unsqueeze(-1) * mem_p).sum(1)                      # retrieved place code
+                conf = torch.sigmoid(self.gate(torch.cat([h, read_p, read_mu - mu], -1)))
+                mu = mu + conf * (read_mu - mu)                                # loop-closure correction
+                mem_p = mem_p.clone(); mem_mu = mem_mu.clone(); mem_mask = mem_mask.clone()
+                mem_p[:, wptr] = p.detach(); mem_mu[:, wptr] = mu.detach(); mem_mask[:, wptr] = 1.0
+                wptr = (wptr + 1) % self.M
             outs.append(mu)
-            # write to ring buffer (detach memory contents -> stable, like an episodic store)
-            mem_p = mem_p.clone(); mem_mu = mem_mu.clone(); mem_mask = mem_mask.clone()
-            mem_p[:, wptr] = p.detach(); mem_mu[:, wptr] = mu.detach(); mem_mask[:, wptr] = 1.0
-            wptr = (wptr + 1) % self.M
         return torch.stack(outs, 1)                                            # (B,T,2)
 
 
@@ -82,3 +93,28 @@ class GRUBaseline(nn.Module):
     def forward(self, geo, lm, motion):
         x = torch.cat([geo, lm, motion], -1)
         y, _ = self.gru(x); return self.out(y)
+
+
+class TransformerBaseline(nn.Module):
+    """Causal Transformer on [geo,lm,motion] -> displacement (phase-1 baseline; expected to memorize)."""
+    def __init__(self, din=66, h=128, layers=4, heads=4, maxT=2200):
+        super().__init__()
+        self.inp = nn.Linear(din, h)
+        self.pos = nn.Parameter(torch.zeros(1, maxT, h))
+        enc = nn.TransformerEncoderLayer(h, heads, h * 2, batch_first=True, dropout=0.0)
+        self.tr = nn.TransformerEncoder(enc, layers); self.out = nn.Linear(h, 2)
+
+    def forward(self, geo, lm, motion):
+        x = torch.cat([geo, lm, motion], -1); B, T, _ = x.shape
+        x = self.inp(x) + self.pos[:, :T]
+        mask = torch.triu(torch.ones(T, T, device=x.device), 1).bool()
+        return self.out(self.tr(x, mask=mask))
+
+
+def build(arch):
+    if arch == "gru": return GRUBaseline()
+    if arch == "transformer": return TransformerBaseline()
+    if arch == "mgm": return MGM(use_rot=True, use_mem=True)
+    if arch == "mgm_norot": return MGM(use_rot=False, use_mem=True)     # ablate rotation-invariance
+    if arch == "mgm_nomem": return MGM(use_rot=True, use_mem=False)     # ablate motion-gated memory
+    raise ValueError(arch)

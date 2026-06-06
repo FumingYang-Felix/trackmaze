@@ -3,9 +3,9 @@
 window = navigable accuracy) and GLOBAL error (final displacement). Thesis: the motion-gated-memory arch
 keeps LOCAL flat and GLOBAL growing SLOWER than the plain GRU across sizes (the GRU memorizes a landmark
 vocabulary that doesn't transfer -- phase-1)."""
-import argparse, time, numpy as np, torch, torch.nn as nn
+import argparse, time, os, numpy as np, torch, torch.nn as nn
 from generate_allo import gen_allo
-from arch_mgm import MGM, GRUBaseline
+from arch_mgm import build
 
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -24,13 +24,9 @@ def lerr(p, t, W=30):
     return np.linalg.norm(rp - rt, axis=2).mean()
 
 
-def make_model(arch):
-    return MGM().to(DEV) if arch == "mgm" else GRUBaseline().to(DEV)
-
-
 def train(arch, train_sets, epochs, bs, lr, seed):
     torch.manual_seed(seed); np.random.seed(seed)
-    model = make_model(arch); opt = torch.optim.Adam(model.parameters(), lr)
+    model = build(arch).to(DEV); opt = torch.optim.Adam(model.parameters(), lr)
     rng = np.random.default_rng(seed)
     for ep in range(epochs):
         # sample a train size, then a minibatch of episodes from it
@@ -63,6 +59,7 @@ if __name__ == "__main__":
     ap.add_argument("--archs", nargs="+", default=["mgm", "gru"])
     ap.add_argument("--train_sizes", type=int, nargs="+", default=[6, 12])
     ap.add_argument("--eval_sizes", type=int, nargs="+", default=[6, 12, 20, 28, 40])
+    ap.add_argument("--out", default="")   # if set, append "arch seed n local global" lines for aggregation
     a = ap.parse_args()
     print(f"device={DEV} train_sizes={a.train_sizes} eval_sizes={a.eval_sizes} epochs={a.epochs}", flush=True)
     G = dict(ambiguity=1, canon="cmd", rot_noise=0.09, loop=0.3)
@@ -74,6 +71,11 @@ if __name__ == "__main__":
     for arch in a.archs:
         model = train(arch, train_sets, a.epochs, a.bs, a.lr, a.seed)
         results[arch] = {n: evaluate(model, eval_sets[n]) for n in a.eval_sizes}
+        if a.out:
+            with open(a.out, "a") as f:
+                for n in a.eval_sizes:
+                    lo, gl = results[arch][n]
+                    f.write(f"{arch} {a.seed} {n} {lo:.4f} {gl:.4f}\n")
     print(f"\n{'n':>4} {'grid':>8} | " + " | ".join(f"{arch+' LOCAL/GLOBAL':>18}" for arch in a.archs))
     for n in a.eval_sizes:
         tag = "*tr*" if n in a.train_sizes else ""
