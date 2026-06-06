@@ -4,7 +4,7 @@ window = navigable accuracy) and GLOBAL error (final displacement). Thesis: the 
 keeps LOCAL flat and GLOBAL growing SLOWER than the plain GRU across sizes (the GRU memorizes a landmark
 vocabulary that doesn't transfer -- phase-1)."""
 import argparse, time, os, numpy as np, torch, torch.nn as nn
-from generate_allo import gen_allo
+from generate_allo import gen_allo, gen_allo_dfs
 from arch_mgm import build
 
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
@@ -62,12 +62,15 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="")   # if set, append "arch seed n local global" lines for aggregation
     ap.add_argument("--save", default="")   # if set, torch.save the trained model state_dict here
     ap.add_argument("--canon", default="cmd", choices=["cmd", "corrected", "true"])  # heading frame for canonicalization
+    ap.add_argument("--traversal", type=int, default=0)   # 1 = oracle-DFS traversal data (real maze-crossing, fixes the spinning confound)
     a = ap.parse_args()
     print(f"device={DEV} train_sizes={a.train_sizes} eval_sizes={a.eval_sizes} epochs={a.epochs}", flush=True)
     G = dict(ambiguity=1, canon=a.canon, rot_noise=0.09, loop=0.3)
     t0 = time.time()
-    train_sets = [tens(gen_allo(n=n, n_eps=300, T=24 * n, seed=1, **G)) for n in a.train_sizes]
-    eval_sets = {n: gen_allo(n=n, n_eps=60, T=24 * n, seed=7, **G) for n in a.eval_sizes}
+    GEN = gen_allo_dfs if a.traversal else gen_allo
+    Tm = 40 if a.traversal else 24                          # traversal needs a longer (size-scaled) path
+    train_sets = [tens(GEN(n=n, n_eps=200, T=Tm * n, seed=1, **G)) for n in a.train_sizes]
+    eval_sets = {n: GEN(n=n, n_eps=40, T=Tm * n, seed=7, **G) for n in a.eval_sizes}
     print(f"data ready ({time.time()-t0:.0f}s)", flush=True)
     results = {}
     for arch in a.archs:

@@ -77,6 +77,60 @@ def gen_allo(n, n_eps, T, ambiguity=1, seed=0, canon="true", action_noise=0.03, 
     return dict(canon_geo=np.stack(CG), canon_lm=np.stack(CL), action=np.stack(ACT), cmd_step=np.stack(STEP),
                 pos=np.stack(POS), disp=np.stack(DISP), cell=np.stack(CELL), reanchor=np.stack(RA), n=n, KO=KO)
 
+def gen_allo_dfs(n, n_eps, T, ambiguity=1, seed=0, canon="cmd", action_noise=0.03, rot_noise=0.09,
+                 loop=0.0, lm_density=0.15, fuse_gain=0.3):
+    """TRAVERSAL data: drive an ORACLE DFS walk that actually CROSSES the maze (coverage + backtracks +
+    revisits, displacement-from-start SCALES with size), recording the same per-step canon obs + commanded
+    odometry + targets as gen_allo. Fixes the spinning-explorer confound: the agent really traverses the
+    large maze instead of wandering ~5 cells. Caps each episode at T env steps."""
+    import sys
+    from round3a import cell_graph, dfs_walk, wrap, motion as _motion
+    sys.setrecursionlimit(2_000_000)
+    rng = np.random.default_rng(seed); mv, rot = 0.22, 0.20
+    CG, CL, ACT, POS, DISP, CELL, RA, STEP = [], [], [], [], [], [], [], []
+    for e in range(n_eps):
+        env = TrackMazeEnv(n=n, ambiguity=ambiguity, lm_density=lm_density, seed=seed * 100000 + e,
+                           max_steps=10 ** 9, action_noise=action_noise, rot_noise=rot_noise, loop=loop)
+        env.reset(); ang0 = env.ang; cmd = 0.0; corr = 0.0
+        adj = cell_graph(env.wall, n); walk = dfs_walk(adj, (0, 0))
+        cg, cl, ac, po, ra, st = [], [], [], [np.array([env.px, env.py], np.float32)], [], []
+        done = False
+        for (cx, cy) in walk[1:]:
+            if done: break
+            wx, wy = 2 * cx + 1.5, 2 * cy + 1.5
+            for _ in range(60):
+                if len(cg) >= T: done = True; break
+                dx, dy = wx - env.px, wy - env.py
+                if math.hypot(dx, dy) < 0.3: break
+                err = wrap(math.atan2(dy, dx) - env.ang)
+                a = 3 if (abs(err) > rot and err > 0) else (2 if abs(err) > rot else 0)
+                g, l = omni(env.wall, env.col, env.px, env.py, env.ang)
+                if canon == "corrected":
+                    gobs = (_grid_heading(g) - (ang0 % (math.pi / 2))) % (math.pi / 2)
+                    k = round((corr - gobs) / (math.pi / 2)); corr += fuse_gain * _wrap(gobs + k * (math.pi / 2) - corr)
+                    h = corr
+                else:
+                    h = (env.ang - ang0) if canon == "true" else cmd
+                sh = int(round(h / (2 * math.pi) * KO))
+                cg.append(np.roll(g, sh)); cl.append(np.roll(l, sh)); ac.append(a)
+                f = mv if a == 0 else 0.0
+                hf = corr if canon == "corrected" else cmd
+                st.append(np.array([f * math.cos(hf), f * math.sin(hf)], np.float32))
+                if a == 2: cmd -= rot; corr -= rot
+                elif a == 3: cmd += rot; corr += rot
+                _motion(env, a); po.append(np.array([env.px, env.py], np.float32))
+        Tn = len(cg)
+        pos = np.stack(po[:Tn]); cells = np.floor(pos).astype(np.int64)
+        CG.append(np.stack(cg)); CL.append(np.stack(cl)); ACT.append(np.array(ac, np.int64))
+        POS.append(pos); DISP.append(egocentric_disp(pos, ang0)); STEP.append(np.stack(st))
+        CELL.append(cells[:, 1] * 1000 + cells[:, 0]); RA.append(np.zeros(Tn, bool))
+    # episodes may differ in length; truncate all to the min (DFS walk length varies)
+    Tmin = min(len(x) for x in CG)
+    cut = lambda L: np.stack([x[:Tmin] for x in L])
+    return dict(canon_geo=cut(CG), canon_lm=cut(CL), action=cut(ACT), cmd_step=cut(STEP),
+                pos=cut(POS), disp=cut(DISP), cell=cut(CELL), reanchor=cut(RA), n=n, KO=KO)
+
+
 if __name__ == "__main__":
     ds = gen_allo(n=6, n_eps=3, T=80, canon="true")
     for k, v in ds.items(): print(k, getattr(v, "shape", v))
