@@ -60,6 +60,7 @@ if __name__ == "__main__":
     ap.add_argument("--train_sizes", type=int, nargs="+", default=[6, 12])
     ap.add_argument("--eval_sizes", type=int, nargs="+", default=[6, 12, 20, 28, 40])
     ap.add_argument("--out", default="")   # if set, append "arch seed n local global" lines for aggregation
+    ap.add_argument("--save", default="")   # if set, torch.save the trained model state_dict here
     a = ap.parse_args()
     print(f"device={DEV} train_sizes={a.train_sizes} eval_sizes={a.eval_sizes} epochs={a.epochs}", flush=True)
     G = dict(ambiguity=1, canon="cmd", rot_noise=0.09, loop=0.3)
@@ -70,6 +71,8 @@ if __name__ == "__main__":
     results = {}
     for arch in a.archs:
         model = train(arch, train_sets, a.epochs, a.bs, a.lr, a.seed)
+        if a.save:
+            torch.save(model.state_dict(), a.save); print(f"saved {arch} -> {a.save}", flush=True)
         results[arch] = {n: evaluate(model, eval_sets[n]) for n in a.eval_sizes}
         if a.out:
             with open(a.out, "a") as f:
