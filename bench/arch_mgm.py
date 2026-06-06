@@ -43,9 +43,11 @@ class PlainEnc(nn.Module):
 
 
 class MGM(nn.Module):
-    def __init__(self, h=128, d=64, M=64, tau=2.0, use_rot=True, use_mem=True):
+    def __init__(self, h=128, d=64, M=64, tau=2.0, use_rot=True, use_mem=True, use_grid=False,
+                 periods=(4.0, 8.0, 16.0, 32.0)):
         super().__init__()
-        self.use_mem = use_mem
+        self.use_mem = use_mem; self.use_grid = use_grid
+        self.register_buffer("periods", torch.tensor(periods).float())   # idea-B: multi-scale periodic gate
         self.enc = RotInvEnc(d=d) if use_rot else PlainEnc(d=d)
         self.gru = nn.GRUCell(d + 2, h)
         self.to_mu = nn.Linear(h, 2)                  # residual position head (refines integrated mu)
@@ -71,8 +73,13 @@ class MGM(nn.Module):
             if self.use_mem:
                 # motion-gated memory read
                 content = (mem_p * p.unsqueeze(1)).sum(-1) / (self.d ** 0.5)    # (B,M)
-                gatev = -((mem_mu - mu.unsqueeze(1)) ** 2).sum(-1) / tau2       # motion-reachability gate
-                logits = content + gatev + (mem_mask - 1.0) * 1e4              # mask empty slots
+                if self.use_grid:                                              # idea-B: multi-scale periodic gate
+                    diff = mem_mu - mu.unsqueeze(1)                            # (B,M,2)
+                    ph = 2 * 3.141592653589793 * diff.unsqueeze(-1) / self.periods.view(1, 1, 1, -1)
+                    gatev = torch.cos(ph).mean((-1, -2)) * 4.0                 # coarse scale tolerates drift, fine disambiguates
+                else:
+                    gatev = -((mem_mu - mu.unsqueeze(1)) ** 2).sum(-1) / tau2  # motion-reachability gate
+                logits = content + gatev + (mem_mask - 1.0) * 1e4             # mask empty slots
                 w = torch.softmax(logits, 1)                                   # (B,M)
                 read_mu = (w.unsqueeze(-1) * mem_mu).sum(1)                     # retrieved position
                 read_p = (w.unsqueeze(-1) * mem_p).sum(1)                      # retrieved place code
@@ -115,6 +122,8 @@ def build(arch):
     if arch == "gru": return GRUBaseline()
     if arch == "transformer": return TransformerBaseline()
     if arch == "mgm": return MGM(use_rot=True, use_mem=True)
-    if arch == "mgm_norot": return MGM(use_rot=False, use_mem=True)     # ablate rotation-invariance
+    if arch == "mgm_norot": return MGM(use_rot=False, use_mem=True)     # ablate rotation-invariance (Round 8 best)
     if arch == "mgm_nomem": return MGM(use_rot=True, use_mem=False)     # ablate motion-gated memory
+    if arch == "mgm_grid": return MGM(use_rot=False, use_mem=True, use_grid=True)   # idea-B periodic gate
+    if arch == "mgm_grid_M128": return MGM(use_rot=False, use_mem=True, use_grid=True, M=128)
     raise ValueError(arch)
