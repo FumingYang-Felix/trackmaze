@@ -44,16 +44,19 @@ class PlainEnc(nn.Module):
 
 class MGM(nn.Module):
     def __init__(self, h=128, d=64, M=64, tau=2.0, use_rot=True, use_mem=True, use_grid=False,
-                 periods=(4.0, 8.0, 16.0, 32.0)):
+                 use_kv=False, n_corr=1, dk=48, periods=(4.0, 8.0, 16.0, 32.0)):
         super().__init__()
-        self.use_mem = use_mem; self.use_grid = use_grid
+        self.use_mem = use_mem; self.use_grid = use_grid; self.use_kv = use_kv; self.n_corr = n_corr
         self.register_buffer("periods", torch.tensor(periods).float())   # idea-B: multi-scale periodic gate
         self.enc = RotInvEnc(d=d) if use_rot else PlainEnc(d=d)
         self.gru = nn.GRUCell(d + 2, h)
         self.to_mu = nn.Linear(h, 2)                  # residual position head (refines integrated mu)
         self.gate = nn.Sequential(nn.Linear(h + d + 2, 32), nn.ReLU(), nn.Linear(32, 1))  # loop-closure confidence
         self.log_tau = nn.Parameter(torch.tensor(float(torch.log(torch.tensor(tau)))))
-        self.h, self.d, self.M = h, d, M
+        self.h, self.d, self.M, self.dk = h, d, M, dk
+        if use_kv:
+            self.key = nn.Linear(d, dk); self.qry = nn.Linear(d, dk)        # learned key/query projections
+            self.wimp = nn.Sequential(nn.Linear(h, 16), nn.ReLU(), nn.Linear(16, 1))  # learned write importance (R3)
 
     def forward(self, geo, lm, motion):
         B, T, K = geo.shape
@@ -61,32 +64,40 @@ class MGM(nn.Module):
         h = torch.zeros(B, self.h, device=dev)
         mu = torch.zeros(B, 2, device=dev)
         mem_p = torch.zeros(B, self.M, self.d, device=dev)
+        mem_k = torch.zeros(B, self.M, self.dk, device=dev) if self.use_kv else None
         mem_mu = torch.zeros(B, self.M, 2, device=dev)
-        mem_mask = torch.zeros(B, self.M, device=dev)
+        mem_occ = torch.zeros(B, self.M, device=dev)             # occupancy (0 empty / 1 written) for masking
+        mem_imp = torch.zeros(B, self.M, device=dev)             # learned write importance -> additive log bias
         wptr = 0
         tau2 = (self.log_tau.exp() ** 2) + 1e-3
         outs = []
         for t in range(T):
-            p = self.enc(geo[:, t], lm[:, t])                       # (B,d) heading-free place code
+            p = self.enc(geo[:, t], lm[:, t])                       # (B,d) place code
             h = self.gru(torch.cat([p, motion[:, t]], -1), h)
             mu = mu + motion[:, t] + self.to_mu(h)                  # integrate odometry + learned residual
             if self.use_mem:
-                # motion-gated memory read
-                content = (mem_p * p.unsqueeze(1)).sum(-1) / (self.d ** 0.5)    # (B,M)
-                if self.use_grid:                                              # idea-B: multi-scale periodic gate
-                    diff = mem_mu - mu.unsqueeze(1)                            # (B,M,2)
-                    ph = 2 * 3.141592653589793 * diff.unsqueeze(-1) / self.periods.view(1, 1, 1, -1)
-                    gatev = torch.cos(ph).mean((-1, -2)) * 4.0                 # coarse scale tolerates drift, fine disambiguates
+                if self.use_kv:
+                    q = self.qry(p)                                            # (B,dk)
+                    content = (mem_k * q.unsqueeze(1)).sum(-1) / (self.dk ** 0.5)
                 else:
-                    gatev = -((mem_mu - mu.unsqueeze(1)) ** 2).sum(-1) / tau2  # motion-reachability gate
-                logits = content + gatev + (mem_mask - 1.0) * 1e4             # mask empty slots
-                w = torch.softmax(logits, 1)                                   # (B,M)
-                read_mu = (w.unsqueeze(-1) * mem_mu).sum(1)                     # retrieved position
-                read_p = (w.unsqueeze(-1) * mem_p).sum(1)                      # retrieved place code
-                conf = torch.sigmoid(self.gate(torch.cat([h, read_p, read_mu - mu], -1)))
-                mu = mu + conf * (read_mu - mu)                                # loop-closure correction
-                mem_p = mem_p.clone(); mem_mu = mem_mu.clone(); mem_mask = mem_mask.clone()
-                mem_p[:, wptr] = p.detach(); mem_mu[:, wptr] = mu.detach(); mem_mask[:, wptr] = 1.0
+                    content = (mem_p * p.unsqueeze(1)).sum(-1) / (self.d ** 0.5)
+                for _ in range(self.n_corr):                                  # iterative loop-closure correction
+                    if self.use_grid:
+                        diff = mem_mu - mu.unsqueeze(1)
+                        ph = 2 * 3.141592653589793 * diff.unsqueeze(-1) / self.periods.view(1, 1, 1, -1)
+                        gatev = torch.cos(ph).mean((-1, -2)) * 4.0
+                    else:
+                        gatev = -((mem_mu - mu.unsqueeze(1)) ** 2).sum(-1) / tau2
+                    w = torch.softmax(content + gatev + mem_imp + (mem_occ - 1.0) * 1e4, 1)
+                    read_mu = (w.unsqueeze(-1) * mem_mu).sum(1)
+                    read_p = (w.unsqueeze(-1) * mem_p).sum(1)
+                    conf = torch.sigmoid(self.gate(torch.cat([h, read_p, read_mu - mu], -1)))
+                    mu = mu + conf * (read_mu - mu)
+                mem_p = mem_p.clone(); mem_mu = mem_mu.clone(); mem_occ = mem_occ.clone(); mem_imp = mem_imp.clone()
+                mem_p[:, wptr] = p.detach(); mem_mu[:, wptr] = mu.detach(); mem_occ[:, wptr] = 1.0
+                if self.use_kv:
+                    mem_k = mem_k.clone(); mem_k[:, wptr] = self.key(p).detach()
+                    mem_imp[:, wptr] = torch.log(torch.sigmoid(self.wimp(h)).squeeze(-1) + 1e-4).detach()  # learned importance
                 wptr = (wptr + 1) % self.M
             outs.append(mu)
         return torch.stack(outs, 1)                                            # (B,T,2)
@@ -100,6 +111,14 @@ class GRUBaseline(nn.Module):
     def forward(self, geo, lm, motion):
         x = torch.cat([geo, lm, motion], -1)
         y, _ = self.gru(x); return self.out(y)
+
+
+class LSTMBaseline(nn.Module):
+    def __init__(self, din=66, h=128):
+        super().__init__(); self.lstm = nn.LSTM(din, h, batch_first=True); self.out = nn.Linear(h, 2)
+
+    def forward(self, geo, lm, motion):
+        y, _ = self.lstm(torch.cat([geo, lm, motion], -1)); return self.out(y)
 
 
 class TransformerBaseline(nn.Module):
@@ -120,10 +139,14 @@ class TransformerBaseline(nn.Module):
 
 def build(arch):
     if arch == "gru": return GRUBaseline()
+    if arch == "lstm": return LSTMBaseline()
     if arch == "transformer": return TransformerBaseline()
     if arch == "mgm": return MGM(use_rot=True, use_mem=True)
     if arch == "mgm_norot": return MGM(use_rot=False, use_mem=True)     # ablate rotation-invariance (Round 8 best)
     if arch == "mgm_nomem": return MGM(use_rot=True, use_mem=False)     # ablate motion-gated memory
     if arch == "mgm_grid": return MGM(use_rot=False, use_mem=True, use_grid=True)   # idea-B periodic gate
     if arch == "mgm_grid_M128": return MGM(use_rot=False, use_mem=True, use_grid=True, M=128)
+    # Round 10 (D): strengthen -- learned key/value memory + learned write importance + iterative correction
+    if arch == "mgm_v2": return MGM(use_rot=False, use_mem=True, use_kv=True, n_corr=2, h=192, M=96)
+    if arch == "mgm_v2_big": return MGM(use_rot=False, use_mem=True, use_kv=True, n_corr=3, h=256, M=128)
     raise ValueError(arch)
