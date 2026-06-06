@@ -58,14 +58,22 @@ class Policy(nn.Module):
         return self.pi(y[:, 0]), self.v(y[:, 0]).squeeze(-1), hn
 
 
-def rollout_episode(env, model, n, max_steps, step_cost, r_goal, greedy=False, shape=0.0):
+def rollout_episode(env, model, n, max_steps, step_cost, r_goal, greedy=False, shape=0.0, novelty=0.0):
     """Run one episode with the policy controlling actions. Returns trajectory tensors + (reached, steps).
-    shape>0 adds potential-based geodesic shaping (training signal; theory-preserving, uses true goal dist)."""
+    Reward design (corrected per the dead-end/backtrack concern):
+      -step_cost            : penalize length UNIFORMLY (necessary backtrack costs exactly its steps, no more)
+      +novelty (NEW cell)   : reward exploring a NOT-YET-VISITED cell; a revisit (backtrack OR circle-back)
+                              gets NO bonus but is NOT extra-penalized -> minimum backtrack is allowed, and
+                              the policy must use MEMORY to recognise 'been here' to avoid pointless re-walk.
+      +r_goal (reached)     : the task.
+    shape>0 (optional, default OFF) = potential-based geodesic shaping; it DISFAVORS going away from the goal,
+    so it implicitly penalises exploring/backtracking through dead-end branches and uses privileged goal info
+    that the partial-obs policy can't use at eval -> prefer novelty instead."""
     env.reset(); cmd = 0.0; last_a = 0
     h = torch.zeros(1, 1, model.gru.hidden_size, device=DEV)
     dist = geo_dist(env, n) if shape > 0 else None
     def cell(): return ((int(env.px) - 1) // 2, (int(env.py) - 1) // 2)
-    prev_phi = (-dist.get(cell(), 2 * n)) if shape > 0 else 0.0
+    seen = {cell()}; prev_phi = (-dist.get(cell(), 2 * n)) if shape > 0 else 0.0
     obss, acts, logps, vals, rews = [], [], [], [], []
     reached = False
     for t in range(max_steps):
@@ -82,9 +90,12 @@ def rollout_episode(env, model, n, max_steps, step_cost, r_goal, greedy=False, s
         _, _, done, gt = env.step(a)
         last_a = a
         rr = -step_cost
+        c = cell()
+        if novelty > 0 and c not in seen:
+            rr += novelty; seen.add(c)                            # reward NEW cells; revisits neutral (backtrack OK)
         if shape > 0:
-            phi = -dist.get(cell(), 2 * n)
-            rr += shape * (0.99 * phi - prev_phi); prev_phi = phi   # potential-based shaping
+            phi = -dist.get(c, 2 * n)
+            rr += shape * (0.99 * phi - prev_phi); prev_phi = phi   # potential-based shaping (default off)
         if math.hypot(env.gx - env.px, env.gy - env.py) < 0.6:
             rr += r_goal; reached = True
         rews.append(rr)
@@ -122,7 +133,8 @@ if __name__ == "__main__":
     ap.add_argument("--max_mult", type=int, default=8); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--eval_sizes", type=int, nargs="+", default=[5, 7, 12, 20, 28])
     ap.add_argument("--clip", type=float, default=0.2); ap.add_argument("--epochs", type=int, default=4)
-    ap.add_argument("--shape", type=float, default=0.5); ap.add_argument("--curriculum", type=int, default=0)
+    ap.add_argument("--shape", type=float, default=0.0); ap.add_argument("--novelty", type=float, default=0.3)
+    ap.add_argument("--curriculum", type=int, default=0)
     ap.add_argument("--tag", default=""); ap.add_argument("--out", default="")
     a = ap.parse_args()
     torch.manual_seed(a.seed); np.random.seed(a.seed)
@@ -141,7 +153,7 @@ if __name__ == "__main__":
         for e in range(a.eps_per_iter):
             n = sizes_now[rng.integers(len(sizes_now))]
             env = TrackMazeEnv(n=n, ambiguity=1, lm_density=0.15, loop=0.3, seed=int(rng.integers(10 ** 8)), max_steps=10 ** 9)
-            tr, rd, stp = rollout_episode(env, model, n, a.max_mult * n * n, a.step_cost, a.r_goal, shape=a.shape)
+            tr, rd, stp = rollout_episode(env, model, n, a.max_mult * n * n, a.step_cost, a.r_goal, shape=a.shape, novelty=a.novelty)
             adv, ret = gae(tr["rew"], tr["val"]); tr["adv"] = adv; tr["ret"] = ret; traj.append(tr)
             reach.append(rd); steps.append(stp)
         # PPO update (per-episode sequences; flatten for the loss)
