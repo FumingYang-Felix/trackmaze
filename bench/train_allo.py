@@ -14,7 +14,8 @@ from arch_allo import AlloTracker
 def tens(ds):
     geo = torch.from_numpy(ds["canon_geo"]); lm = torch.from_numpy(ds["canon_lm"])
     act = torch.from_numpy(ds["action"]); oh = torch.zeros(*act.shape, 4); oh.scatter_(2, act.unsqueeze(-1), 1.0)
-    return geo, lm, oh, torch.from_numpy(ds["disp"]), torch.from_numpy(ds["cell"])
+    return (geo, lm, oh, torch.from_numpy(ds["disp"]), torch.from_numpy(ds["cell"]),
+            torch.from_numpy(ds["cmd_step"]))
 
 def contrastive(v, cells, gap=8, temp=0.07):
     B, T, _ = v.shape; tot = 0.0; nb = 0
@@ -39,10 +40,12 @@ def revisit_consistency(mu, cells, gap=8):
         d = torch.cdist(mu[b], mu[b]); tot = tot + d[same].mean(); nb += 1
     return tot / max(nb, 1)
 
-def train(model, geo, lm, oh, y, cells, dev, ea, eb, bs=32, lr=1e-3, beta=1.0, consistency=0.0):
-    model.to(dev); geo, lm, oh, y, cells = [t.to(dev) for t in (geo, lm, oh, y, cells)]; E = geo.shape[0]
+def train(model, geo, lm, oh, y, cells, cmd_step, dev, ea, eb, bs=32, lr=1e-3, beta=1.0,
+          consistency=0.0, selfsup=False):
+    model.to(dev); geo, lm, oh, y, cells, cmd_step = [t.to(dev) for t in (geo, lm, oh, y, cells, cmd_step)]
+    E = geo.shape[0]
     vp = list(model.view.parameters()); optA = torch.optim.Adam(vp, lr)
-    for ep in range(ea):                                   # Stage A: place code
+    for ep in range(ea):                                   # Stage A: place code (uses GT cells = data association)
         perm = torch.randperm(E)
         for i in range(0, E, bs):
             b = perm[i:i+bs]; optA.zero_grad()
@@ -50,20 +53,25 @@ def train(model, geo, lm, oh, y, cells, dev, ea, eb, bs=32, lr=1e-3, beta=1.0, c
     for p in vp: p.requires_grad = False
     rest = [p for p in model.parameters() if p.requires_grad]
     optB = torch.optim.Adam(rest, lr); mse = nn.MSELoss(); bce = nn.BCELoss()
-    for ep in range(eb):                                   # Stage B: integrator + correction
+    for ep in range(eb):                                   # Stage B
         perm = torch.randperm(E)
         for i in range(0, E, bs):
             b = perm[i:i+bs]; optB.zero_grad()
-            mu, v, mu_prior, g, lbl = model(geo[b], lm[b], oh[b], gt_disp=y[b], return_aux=True)
-            loss = mse(mu, y[b]) + mse(mu_prior, y[b])
-            if g is not None: loss = loss + beta * bce(g, lbl)
-            if consistency > 0: loss = loss + consistency * revisit_consistency(mu, cells[b])
+            mu, v, mu_prior, g, lbl = model(geo[b], lm[b], oh[b], gt_disp=(None if selfsup else y[b]), return_aux=True)
+            if selfsup:                                    # NO position GT: odometry + revisit-consistency only
+                step = mu[:, 1:] - mu[:, :-1]
+                loss = mse(step, cmd_step[b][:, 1:]) + (mu[:, 0] ** 2).mean()   # follow commands, anchor start
+                if consistency > 0: loss = loss + consistency * revisit_consistency(mu, cells[b])
+            else:
+                loss = mse(mu, y[b]) + mse(mu_prior, y[b])
+                if g is not None: loss = loss + beta * bce(g, lbl)
+                if consistency > 0: loss = loss + consistency * revisit_consistency(mu, cells[b])
             loss.backward(); optB.step()
     return model
 
 @torch.no_grad()
 def final_err(model, ds, dev, use_memory):
-    model.eval(); model.use_memory = use_memory; geo, lm, oh, y, _ = tens(ds)
+    model.eval(); model.use_memory = use_memory; geo, lm, oh, y, _, _ = tens(ds)
     mu = model(geo.to(dev), lm.to(dev), oh.to(dev)).cpu().numpy()
     return per_step_error(mu, ds["disp"])[:, -1].mean()
 
@@ -76,19 +84,21 @@ if __name__ == "__main__":
     ap.add_argument("--ema_gain", type=float, default=0.3); ap.add_argument("--store_gap", type=int, default=3)
     ap.add_argument("--mask_recent", type=int, default=12); ap.add_argument("--topk", type=int, default=3)
     ap.add_argument("--consistency", type=float, default=0.0)   # wave-2: revisit-consistency loss weight
+    ap.add_argument("--selfsup", action="store_true")           # exp-3: NO position GT (odometry + consistency only)
     a = ap.parse_args(); torch.manual_seed(a.seed); np.random.seed(a.seed); dev = a.device
     G = dict(ambiguity=1, canon=a.canon, rot_noise=a.rot_noise, loop=a.loop)
     tr = gen_allo(n=a.train_n, n_eps=200, T=int(160*a.tscale), seed=1, **G)
-    geo, lm, oh, y, cells = tens(tr)
+    geo, lm, oh, y, cells, cmd_step = tens(tr)
     model = AlloTracker(store_gap=a.store_gap, mask_recent=a.mask_recent, ema_gain=a.ema_gain, topk=a.topk)
-    train(model, geo, lm, oh, y, cells, dev, a.epochs, a.epochs, consistency=a.consistency)
-    bs, large = [], []
+    train(model, geo, lm, oh, y, cells, cmd_step, dev, a.epochs, a.epochs,
+          consistency=a.consistency, selfsup=a.selfsup)
+    bs, large, on_large = [], [], []
     for n in (6, 12, 20, 28):
         te = gen_allo(n=n, n_eps=60, T=int(24*n*a.tscale), seed=7, **G)
         off = final_err(model, te, dev, False); on = final_err(model, te, dev, True)
         bs.append(off - on)
-        if n >= 20: large.append(off - on)
-    cfg = (f"canon={a.canon} loop={a.loop} rot={a.rot_noise} tscale={a.tscale} trainN={a.train_n} "
-           f"ema={a.ema_gain} gap={a.store_gap} recent={a.mask_recent} topk={a.topk} cons={a.consistency} seed={a.seed}")
-    print(f"RESULT [{cfg}] LARGE_benefit={np.mean(large):+.3f} mean={np.mean(bs):+.3f} "
-          f"per_size={[round(b,2) for b in bs]}")
+        if n >= 20: large.append(off - on); on_large.append(on)
+    cfg = (f"canon={a.canon} loop={a.loop} selfsup={a.selfsup} trainN={a.train_n} ema={a.ema_gain} "
+           f"topk={a.topk} cons={a.consistency} seed={a.seed}")
+    print(f"RESULT [{cfg}] LARGE_benefit={np.mean(large):+.3f} ON_large={np.mean(on_large):.3f} "
+          f"mean={np.mean(bs):+.3f} per_size={[round(b,2) for b in bs]}")

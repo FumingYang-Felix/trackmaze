@@ -37,27 +37,29 @@ def omni(wall, col, px, py, ang):
     return g, l
 
 def gen_allo(n, n_eps, T, ambiguity=1, seed=0, canon="true", action_noise=0.03, rot_noise=0.09, loop=0.0):
-    rng = np.random.default_rng(seed)
-    CG, CL, ACT, POS, DISP, CELL, RA = [], [], [], [], [], [], []
+    rng = np.random.default_rng(seed); mv, rot = 0.22, 0.20
+    CG, CL, ACT, POS, DISP, CELL, RA, STEP = [], [], [], [], [], [], [], []
     for e in range(n_eps):
         env = TrackMazeEnv(n=n, ambiguity=ambiguity, seed=seed*100000+e, max_steps=T+2,
                            action_noise=action_noise, rot_noise=rot_noise, loop=loop)
         obs = env.reset(); ang0 = env.ang; cmd = 0.0          # command-integrated heading-from-start
-        cg, cl, ac, po, ra = [], [], [], [np.array([env.px, env.py], np.float32)], []
+        cg, cl, ac, po, ra, st = [], [], [], [np.array([env.px, env.py], np.float32)], [], []
         for t in range(T):
             a = explore_policy(obs, rng)
             g, l = omni(env.wall, env.col, env.px, env.py, env.ang)
             h = (env.ang - ang0) if canon == "true" else cmd
             sh = int(round(h/(2*math.pi)*KO))                 # roll into allo (start) frame
             cg.append(np.roll(g, sh)); cl.append(np.roll(l, sh)); ac.append(a)
-            if a == 2: cmd -= 0.20
-            elif a == 3: cmd += 0.20
+            f = mv if a == 0 else (-mv if a == 1 else 0.0)    # COMMANDED step in the start frame (odometry)
+            st.append(np.array([f*math.cos(cmd), f*math.sin(cmd)], np.float32))
+            if a == 2: cmd -= rot
+            elif a == 3: cmd += rot
             obs, _, _, gt = env.step(a); po.append(gt["pos"]); ra.append(gt["reanchor"])
         pos = np.stack(po[:T]); cells = np.floor(pos).astype(np.int64)
         CG.append(np.stack(cg)); CL.append(np.stack(cl)); ACT.append(np.array(ac, np.int64))
-        POS.append(pos); DISP.append(egocentric_disp(pos, ang0))
+        POS.append(pos); DISP.append(egocentric_disp(pos, ang0)); STEP.append(np.stack(st))
         CELL.append(cells[:, 1]*1000 + cells[:, 0]); RA.append(np.array(ra[:T], bool))
-    return dict(canon_geo=np.stack(CG), canon_lm=np.stack(CL), action=np.stack(ACT),
+    return dict(canon_geo=np.stack(CG), canon_lm=np.stack(CL), action=np.stack(ACT), cmd_step=np.stack(STEP),
                 pos=np.stack(POS), disp=np.stack(DISP), cell=np.stack(CELL), reanchor=np.stack(RA), n=n, KO=KO)
 
 if __name__ == "__main__":

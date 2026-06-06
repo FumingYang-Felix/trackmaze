@@ -1,0 +1,12 @@
+--selfsup --loop 0.5 --consistency 0.0 --seed 0
+--selfsup --loop 0.5 --consistency 0.0 --seed 1
+--selfsup --loop 0.5 --consistency 1.0 --seed 0
+--selfsup --loop 0.5 --consistency 1.0 --seed 1
+--selfsup --loop 0.5 --consistency 4.0 --seed 0
+--selfsup --loop 0.5 --consistency 4.0 --seed 1
+--selfsup --loop 0.0 --consistency 1.0 --seed 0
+--selfsup --loop 0.0 --consistency 1.0 --seed 1
+--loop 0.5 --consistency 0.5 --seed 0
+--loop 0.5 --consistency 0.5 --seed 1
+--loop 0.5 --consistency 0.1 --seed 0
+--loop 0.5 --consistency 0.1 --seed 1
