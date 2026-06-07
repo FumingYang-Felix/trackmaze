@@ -115,3 +115,35 @@ architecture that reads the Z_4 synchronization field (not a single integrated f
 in the recoverable phase. THIS is the spotlight: not "we solved OOD tracking" nor "it's impossible", but a
 clean, predictive THEORY OF WHEN it is possible, with the order parameter, the critical dimension, and the
 neuro grounding (HD cells + allothetic anchoring + geometric-module symmetry).
+
+## ★★★ CORRECTION + FINAL RESULT (b16/b17 + honest VISIT-graph floor): gauge IS breakable — topology × coverage
+A correction to the b15 section: the b15 floor used the CELL graph (one node per cell), which collapses the
+temporal random walk and is TOO OPTIMISTIC (it gave ~15°). The honest object is the VISIT/timestep graph (a
+long temporal chain + same-cell closure bundles), where heading lives. Recomputed there:
+
+**Honest visit-graph effective-resistance floor (estimator-free BLUE std of global heading), random-walk
+coverage, vs size:**
+  - TREE (loop=0): grows with size — 100°(17px) → 166°(33px) → 399°(49px). Unrecoverable, worsens with scale.
+  - LOOPY (loop=0.9), with SUFFICIENT loop-closure density (npc~40 closures/cell): FLAT & LOW — 20° → 26° → 28°
+    across 17→33→49px. Below the 45° quadrant-recovery threshold => RECOVERABLE, size-invariant.
+  - The control parameter is CLOSURE DENSITY: loopy with too few closures (npc=10) sits at ~180° (lost); with
+    npc~40 it drops to ~27°. Tree stays >100° (growing) at ANY closure density.
+
+**So the precise, corrected answer to "can we break gauge?": YES, but it is a PHASE TRANSITION requiring BOTH**
+  (1) a 2D-loop-connected environment (not a tree-maze) — the env `loop` knob; AND
+  (2) sufficient loop-closure density (coverage × place-recognition) — enough re-anchoring.
+Given both, the global heading frame is recoverable SIZE-INVARIANTLY (floor ~20–28°, flat). In a tree-maze it is
+fundamentally impossible at any scale (floor grows ~ with maze diameter). This is exactly the classical SLAM
+result sharpened: pose-graph SLAM has BOUNDED global error iff the loop-closure graph is 2D-rigid; the earlier
+"gauge-bound" verdict was the OPEN-LOOP / tree-traversal special case. The single global 2-bit symmetry offset
+(b08) stays irreducible regardless (needs a featural cue, b09).
+
+**Grounding:** Pólya recurrence / effective-resistance dimension (1D-tree: R~distance, diverges; 2D: R~log,
+the marginal recoverable dimension) + 2D synchronization (Z_4 Potts) long-range order + SLAM loop-closure
+rigidity + HD-cell allothetic re-anchoring. The spotlight: a benchmark with a LOOP-DENSITY knob, a COVERAGE/
+closure-density axis, and a SYMMETRY knob exhibits, for global egocentric self-localization, a clean topological
+order/disorder transition (the order parameter = global-frame variance; critical dimension d=2) plus an
+orthogonal symmetry-breaking transition. An architecture that reads the Z_4 synchronization field over a
+2D-rigid loop-closure graph is size-invariant exactly in the ordered phase; one that integrates a single global
+frame (vanilla RNN/Transformer) drifts in BOTH phases. Predictive theory of WHEN OOD self-localization is
+possible — not a single number, a phase diagram.
