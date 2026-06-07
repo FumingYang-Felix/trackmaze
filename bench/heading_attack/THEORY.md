@@ -73,3 +73,45 @@ symmetry offset) that is provably irreducible but functionally unnecessary**. St
 fail because they try to integrate ONE global frame (drifting on L3/L4); an architecture that locks the
 recoverable factorization (grid-anchored φ + topological place graph + local metric + a synchronization read-out
 for q) is size-invariant **by construction**, and treats L5 as a settable latent (a featural cue when present).
+
+## ★★ THE PHASE TRANSITION (b10–b15): "breaking gauge" is set by ENVIRONMENT TOPOLOGY, not solver/data/compute
+The night's deepest result, prompted by "is there really no way through gauge?". I re-examined my own "grows
+with size" verdict and found it was a CONTINUOUS-approximation + WEAK-SOLVER + SINGLE-ENVIRONMENT artifact.
+
+**The quadrant is a Z_4 SYNCHRONIZATION field (a 2D Potts model), not a continuous estimate** (b10). Recovering
+it from pairwise relatives (drift-free-per-step chain + 95% matcher closures) is group synchronization. ICM
+(b11) and naive BP (b14) failed — but that is a SOLVER artifact: ICM cannot make the non-local segment-flips
+that undo accumulated drift (it sat at chain-init, 31%); 1D BP needs O(T) iters and decorrelates under any
+noise. So solver failure ≠ unrecoverable.
+
+**The estimator-free truth is the effective resistance to the anchor on the maze CELL graph** (b15) — the BLUE
+variance floor of the global frame, which no estimator beats. It is a RANDOM-WALK RESISTANCE / Pólya-recurrence
+quantity governed by the graph's DIMENSION:
+  - **Perfect maze = spanning TREE (1D):** R_eff ~ distance → heading-std floor ~ √distance, and the MAX floor
+    GROWS with maze size: 79°→141°→205°→254° for n=20→40→60→80 (b15). The discrete Z_4 field has NO long-range
+    order in 1D. => the global frame DECORRELATES over a finite length, INDEPENDENT of size => **NOT recoverable
+    at scale. Fundamental for trees — no solver/data/compute/architecture changes it.**
+  - **Loopy / 2D-connected (loop≳0.3–0.6):** R_eff ~ log(distance) → floor SATURATES; MAX floor is FLAT with
+    size: 13°→15°→16°→18° for n=20→80 (b15). The Z_4 field has true 2D long-range order (Potts ordered phase).
+    => the global frame IS recoverable SIZE-INVARIANTLY. **Gauge is "broken" — by environment topology.**
+  - Crossover is smooth in loop density: lin-fit slope of std-vs-distance drops 0.139→0.040 as loop 0→0.9; the
+    floor at d=60 drops 40°→10°.
+
+**So the precise answer to "can we break gauge / go forever?":**
+  1. The global METRIC FRAME (heading quadrant + position) is recoverable at any size **iff the environment is
+     2D-loop-connected above a topology threshold.** In a tree-maze it is fundamentally not (1D, linear
+     decorrelation). This is the Pólya-recurrence / lower-critical-dimension law for spatial self-localization:
+     2D is the marginal dimension where global orientation just barely orders (log), 1D/tree never does.
+  2. The single global 2-bit OFFSET ("which way is north") is irreducible regardless of topology — it is an
+     environment SYMMETRY (b08, exact 4-fold), collapsed only by one featural cue (b09).
+  3. The globally-anchored LOCAL structure (fine heading mod-90, local metric, topology) is size-invariant in
+     ALL cases (L0–L2).
+
+This upgrades the verdict from "global tracking is gauge-bounded (negative)" to a **controllable phase
+transition**: a benchmark with a LOOP-DENSITY knob and a SYMMETRY knob exhibits, for global egocentric
+self-localization, (i) a topological order/disorder transition (tree→loopy = unrecoverable→recoverable, the
+Pólya/Potts lower-critical-dimension boundary) and (ii) a symmetry-breaking transition (the 2-bit offset). An
+architecture that reads the Z_4 synchronization field (not a single integrated frame) is size-invariant exactly
+in the recoverable phase. THIS is the spotlight: not "we solved OOD tracking" nor "it's impossible", but a
+clean, predictive THEORY OF WHEN it is possible, with the order parameter, the critical dimension, and the
+neuro grounding (HD cells + allothetic anchoring + geometric-module symmetry).
