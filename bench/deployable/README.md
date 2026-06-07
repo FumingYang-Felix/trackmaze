@@ -22,9 +22,20 @@ quadrant tracking, or does it integrate-and-drift?
 - **OURS-online** = grid-fine (drift-free mod-90, sign-corrected) + grid-anchored integer-quadrant tracker.
   No training, no loop closures — pure structure.
 - Baselines: GRU / Transformer end-to-end on [g, l, action] → (cos, sin) of true heading.
-- Result: [filled by run] — OURS-online is far flatter/lower than the trained integrators, which drift like
-  open-loop dead reckoning. The freq-4 grid signal + recurrent quadrant tracking is an inductive bias the
-  baselines do not discover from raw rays → STRUCTURE beats end-to-end for OOD global heading.
+- Result (median of 10 OOD mazes, loop=0.9, train n=6,12; `compare.log`):
+
+  | size | cmd-int | GRU(raw) | GRU(+grid) | Transformer | OURS-online |
+  |------|--------:|---------:|-----------:|------------:|------------:|
+  | 13px | 60.0 | 21.1 | 14.1 | 57.8 | **2.6** |
+  | 41px | 41.1 | 29.7 | 25.6 | 47.2 | **1.9** |
+  | 89px | 44.2 | 31.8 | 12.5 | 43.7 | **1.8** |
+
+  TRAIN-set error is LOW for all (GRU 7.3, GRU+grid 6.8, Transf 6.6 deg) — so the baselines are NOT
+  undertrained; they fit in-distribution and then DRIFT on OOD size (the integrate-and-drift signature). Raw
+  GRU/Transformer never discover the drift-free grid-anchoring from raw rays. Feeding the freq-4 grid phase as
+  a feature (GRU+grid) cuts error markedly → the win is the INDUCTIVE BIAS, not hand-coding. OURS-online
+  (explicit grid-anchoring + recurrent quadrant tracker) is FLAT at ~2deg = size-invariant. (Median; a few
+  mazes slip a quadrant without loop closures → mean is higher; closures in the recoverable phase remove them.)
 
 ## The remaining wall — PLACE RECOGNITION under aliasing (`seqplace.py`)
 Full global recovery in the recoverable phase needs loop closures = matching revisited places WITHOUT oracle
