@@ -154,4 +154,5 @@ def build(arch):
     # Round 10 (D): strengthen -- learned key/value memory + learned write importance + iterative correction
     if arch == "mgm_v2": return MGM(use_rot=False, use_mem=True, use_kv=True, n_corr=2, h=192, M=96)
     if arch == "mgm_v2_big": return MGM(use_rot=False, use_mem=True, use_kv=True, n_corr=3, h=256, M=128)
+    if arch == "mgm_v2_M512": return MGM(use_rot=False, use_mem=True, use_kv=True, n_corr=3, h=256, M=512)  # big memory for long traversal
     raise ValueError(arch)

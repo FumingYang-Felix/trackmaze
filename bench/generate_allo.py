@@ -65,8 +65,7 @@ def gen_allo(n, n_eps, T, ambiguity=1, seed=0, canon="true", action_noise=0.03, 
             sh = int(round(h/(2*math.pi)*KO))                 # roll into allo (start) frame
             cg.append(np.roll(g, sh)); cl.append(np.roll(l, sh)); ac.append(a)
             f = mv if a == 0 else (-mv if a == 1 else 0.0)    # COMMANDED step in the canonicalization frame (odometry)
-            hf = corr if canon == "corrected" else cmd
-            st.append(np.array([f*math.cos(hf), f*math.sin(hf)], np.float32))
+            st.append(np.array([f*math.cos(h), f*math.sin(h)], np.float32))   # motion frame == roll frame (consistent)
             if a == 2: cmd -= rot; corr -= rot
             elif a == 3: cmd += rot; corr += rot
             obs, _, _, gt = env.step(a); po.append(gt["pos"]); ra.append(gt["reanchor"])
@@ -114,8 +113,7 @@ def gen_allo_dfs(n, n_eps, T, ambiguity=1, seed=0, canon="cmd", action_noise=0.0
                 sh = int(round(h / (2 * math.pi) * KO))
                 cg.append(np.roll(g, sh)); cl.append(np.roll(l, sh)); ac.append(a)
                 f = mv if a == 0 else 0.0
-                hf = corr if canon == "corrected" else cmd
-                st.append(np.array([f * math.cos(hf), f * math.sin(hf)], np.float32))
+                st.append(np.array([f * math.cos(h), f * math.sin(h)], np.float32))   # motion frame == roll frame
                 if a == 2: cmd -= rot; corr -= rot
                 elif a == 3: cmd += rot; corr += rot
                 _motion(env, a); po.append(np.array([env.px, env.py], np.float32))
