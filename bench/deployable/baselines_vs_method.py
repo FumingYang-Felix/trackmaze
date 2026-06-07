@@ -18,7 +18,7 @@ from round3a import cell_graph, wrap, motion
 DEV = "cpu"; HALF = math.pi / 2
 
 
-def rollout(n, seed, loop, T):
+def rollout(n, seed, loop, T, grid_feat=False):
     """Random-walk-ish coverage rollout. Returns per-step [g(32),l(32),turn_onehot(3)] inputs, true heading-
     from-start, and (turn, gh) for the analytic method."""
     env = TrackMazeEnv(n=n, ambiguity=1, lm_density=0.15, loop=loop, seed=seed, max_steps=10 ** 9); env.reset()
@@ -37,7 +37,11 @@ def rollout(n, seed, loop, T):
             turn = 0.20 if a == 3 else (-0.20 if a == 2 else 0.0)
             g, l = omni(env.wall, env.col, env.px, env.py, env.ang)
             oh = [1.0 if a == 0 else 0.0, 1.0 if a == 2 else 0.0, 1.0 if a == 3 else 0.0]
-            X.append(np.concatenate([g, l, oh]).astype(np.float32))
+            ghv = (-_grid_heading(g)) % HALF
+            feats = [g, l, np.array(oh, np.float32)]
+            if grid_feat:   # drift-free freq-4 grid-heading phase as an explicit feature (inductive-bias ablation)
+                feats.append(np.array([math.cos(2 * math.pi * ghv / HALF), math.sin(2 * math.pi * ghv / HALF)], np.float32))
+            X.append(np.concatenate(feats).astype(np.float32))
             H.append(wrap(env.ang - ang0)); TURN.append(prev_turn); GH.append((-_grid_heading(g)) % HALF)
             prev_turn = turn; motion(env, a); steps += 1
         cur = nxt
@@ -60,11 +64,11 @@ class TXNet(nn.Module):
         return self.out(self.tx(self.inp(x), mask=m))
 
 
-def make_batch(mazes, sizes, seed0, T, loop, n_ep):
+def make_batch(mazes, sizes, seed0, T, loop, n_ep, grid_feat=False):
     Xs, Hs = [], []; rng = np.random.default_rng(seed0)
     for e in range(n_ep):
         n = sizes[rng.integers(len(sizes))]
-        X, H, _, _ = rollout(n, seed0 + e, loop, T)
+        X, H, _, _ = rollout(n, seed0 + e, loop, T, grid_feat=grid_feat)
         if len(X) < T: continue
         Xs.append(X[:T]); Hs.append(H[:T])
     X = torch.tensor(np.stack(Xs)).float(); H = torch.tensor(np.stack(Hs)).float()
@@ -81,10 +85,10 @@ def train(model, X, Y, epochs=400, bs=32):
     model.eval(); return model
 
 
-def heading_err_model(model, n, loop, T, mazes=3, seed0=9000):
+def heading_err_model(model, n, loop, T, mazes=3, seed0=9000, grid_feat=False):
     es = []
     for mi in range(mazes):
-        X, H, _, _ = rollout(n, seed0 + mi, loop, T)
+        X, H, _, _ = rollout(n, seed0 + mi, loop, T, grid_feat=grid_feat)
         if len(X) < 10: continue
         with torch.no_grad():
             p = model(torch.tensor(X[None]).float().to(DEV))[0].cpu().numpy()
