@@ -9,6 +9,16 @@ Existing benches sit at two extremes — **MiniGrid** (2D, cheap, but the memory
 TrackMaze aims at the empty middle: **finely controllable difficulty**, **pure state-tracking isolated**,
 the **drift ↔ correction** mechanism instrumented, and **cheap to iterate** (2.5D raycast from a 2D grid).
 
+> ### 📖 The research story → [`STORY.md`](STORY.md)
+> Read this first if you're following the project. It walks the whole journey step by step — the dead-ends and
+> *why* they failed, the confound we caught and corrected, the gauge reframe — to the spotlight result:
+> **OOD egocentric self-localization is a *phase transition* in environment topology × coverage** (we map it);
+> **inductive bias (grid-anchoring) beats end-to-end** Transformers/RNNs on OOD size; and we **realize the
+> recoverable phase end-to-end** with a realistic allothetic sensor — unified by one principle (orientation in
+> open environments needs an allothetic reference, at both local and global scales; the geometric-module /
+> Cheng-1986 law generalized). The formal spine is [`bench/heading_attack/THEORY.md`](bench/heading_attack/THEORY.md);
+> the spotlight figures are `bench/deployable/phase_*.png`.
+
 ## Play the demo
 `demo.html` is a self-contained, dependency-free playable prototype.
 - **Left** = what the agent sees (egocentric 2.5D raycast). **Right** = the ground truth it must *infer*.
@@ -62,13 +72,36 @@ python train_baseline.py                 # GRU baseline + landmark ablation (tor
 ```
 
 ## Status
-`2026-06-05` — **env + ground-truth + metrics + first baseline shipped** (`bench/`); validated that the
-env injects correctable drift and the metrics see it. Next: the architecture suite (transformer · SSM ·
-segment-recurrent · factorized-TEM tracker) and the collapse curves; T2 navigation + SPL; the state probe.
+`2026-06-05` — env + ground-truth + metrics + first baseline shipped (`bench/`); validated correctable drift.
+
+`2026-06-07` — **research arc complete (see [`STORY.md`](STORY.md))**:
+- **Theory:** a predictive **phase diagram** of when OOD global self-localization is size-invariant —
+  recoverable only in **loopy/2-D-connected** environments with enough coverage; **tree-mazes are
+  fundamentally unrecoverable at scale** (Pólya / lower-critical-dimension). Spine:
+  `bench/heading_attack/THEORY.md`; figures `bench/deployable/phase_*.png`.
+- **Caught + corrected a confound** (a spinning scripted explorer faked early "size-invariant" wins) — honest
+  re-eval drove the whole reframe.
+- **Method:** explicit **grid-anchoring** (fine heading vs the walls, drift-free) + quadrant tracking is
+  **flat ~2°** on OOD global heading where GRU/Transformer drift to 21–58°; ablation shows the win is the
+  **inductive bias**.
+- **Deployable:** end-to-end global-heading recovery, **no oracle rotation**, **flat ~2–4° to 49×49** using a
+  realistic **allothetic** sensor (distinct distant cues) — which also resolves the global symmetry (one cue,
+  both scales). Larger sizes need the Z₄-sync back-end's iterations ∝ size and are currently brittle at the
+  borderline (a convergence issue, not fundamental). `bench/deployable/deploy_slam.py`.
+- **Honest limits:** tree-mazes unrecoverable (fundamental); appearance place-recognition under aliasing is the
+  open sub-problem; navigation is topological and needs none of this.
+
+Next: write the spotlight; harden the deployable place-recognition front-end; scale the Z₄-sync back-end
+(iterations ∝ size) and/or a cell-graph reduction.
 
 ## Repo
 ```
-demo.html   self-contained playable 2.5D demo (this is what you click)
-bench/      the trainable benchmark (env + GT + metrics + baseline)
-README.md   this file
+demo.html                       self-contained playable 2.5D demo (this is what you click)
+README.md                       this file
+STORY.md                        the research narrative + spotlight (read this to follow the project)
+bench/                          the trainable benchmark (env + GT + metrics + baselines)
+bench/round*_results.md         the early rounds R2..R15 (incl. the confound + correction)
+bench/heading_attack/           the heading attack b01..b17 + THEORY.md (gauge hierarchy + phase transition)
+bench/deployable/               phase diagram, method-vs-baselines, and the working deployable SLAM
+bench/deployable/phase_*.png    the spotlight phase-diagram figures
 ```

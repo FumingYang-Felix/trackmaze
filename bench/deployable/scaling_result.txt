@@ -1,2 +1,4 @@
 Scaling test: large sizes, MORE BP iters. loop=0.9, K6 R=inf
    n    px |  iters beacon-SLAM  q-acc
+  32    65 |   2500        50.6    95%
+  44    89 |   3500         6.3    95%
