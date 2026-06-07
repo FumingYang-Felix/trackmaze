@@ -1,0 +1,12 @@
+Training (loop=0.9, 1500 ep)...
+TRAIN-set heading err: GRU=7.3  GRU+grid=6.8  Transf=6.6 deg
+GLOBAL heading err (deg, MEDIAN of 10 mazes) vs size. loop=0.9.
+   n    px |    cmd    GRU  GRU+grid  Transf   OURS
+   6    13 |   60.0   21.1      14.1    57.8    2.6
+  12    25 |   33.9   23.0      23.1    47.9    2.4
+  20    41 |   41.1   29.7      25.6    47.2    1.9
+  32    65 |   46.1   26.6      17.6    48.6    2.4
+  44    89 |   44.2   31.8      12.5    43.7    1.8
+
+GRU+grid << GRU(raw) => the win is the INDUCTIVE BIAS (grid feature), not hand-coding. OURS (explicit
+quadrant tracker) best & flat. Baselines train-low/OOD-high => they integrate-and-drift on OOD size.
