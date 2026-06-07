@@ -28,8 +28,18 @@ A few distinct cues at distance (a coarse compass / skyline) recover rotation by
 - 3-6 distinct DISTANT beacons (R=∞): **96-98%**, FLAT with size.
 - 8 beacons at range 10 (~5 cells): **90-93%**, flat — clears the back-end threshold.
 - 5 beacons at range 6: 82-86%.
-End-to-end (grid-fine + beacon-compass quadrant, NO oracle): global heading error [filled by run] — flat & low
-with size. So the recoverable phase is REALIZED with a realistic allothetic sensor.
+
+### END-TO-END DEPLOYABLE METHOD WORKS (no oracle rotation):
+Full pipeline = grid-fine (drift-free) chain + same-cell loop closures whose relative quadrant comes from the
+beacon constellation (grid-corrected: rel = round((beacon_rot − Δgrid)/90)) + Z4-sync (BP) back-end. Global
+heading error vs size, loop=0.9, K=6 distant cues, NO oracle rotation:
+  17px **1.8°** (q-acc 100%) | 33px **3.1°** (98%) | 49px **3.6°** (98%)  — FLAT, size-invariant.
+Two engineering subtleties were essential and now fixed: (a) GRID-CORRECT the closure quadrant (the beacon
+gives full relative heading; the back-end's q is grid-fine-relative); (b) closures must be WELL-DISTRIBUTED
+across the trajectory (connect sampled steps to their cell's first visit), else BP doesn't converge. At ≥65px
+BP needs more iterations (q-acc drops at fixed iters but closAcc stays 100% → pure convergence, iters~size;
+[scaling run confirms]). So the recoverable phase is REALIZED end-to-end by an actual estimator with a
+realistic allothetic sensor.
 
 ## The unifying principle (the real finding)
 Orientation in OPEN (recoverable) environments requires an ALLOTHETIC reference; local geometry is insufficient
