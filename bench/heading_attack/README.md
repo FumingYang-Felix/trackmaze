@@ -55,3 +55,31 @@ the information limit).
   structure -> quadrant (window/map); b05 multi-hypothesis (4 quadrant tracks, prune); b06 obs-anchored
   denoising training. Honest expectation: quadrant is hard; capped by rotation-aliasing (places that look
   4-fold-symmetric). Push to find the practical best.
+
+## b03c BREAKTHROUGH
+- **b03c learned quadrant matcher** (geo+lm cross-corr features -> 4-class relative quadrant): **95-96%
+  accuracy, SIZE-INVARIANT** (raw cross-corr 80%, earlier 62%). The landmark GEOMETRY (not IDs -> transfers
+  OOD, flat across sizes) breaks the rotation symmetry the raw geo cross-corr missed. -> RELIABLE quadrant
+  closures, finally. This is what b03b lacked (62%+greedy). Next b03d: integrate cmd(continuity) + grid(mod-90
+  fine) + 95% matcher (quadrant re-anchor, GENTLE + voting, NOT greedy) -> resolve heading.
+
+## b03d/e FINAL (after fixing a Gauss-Newton SIGN bug that had broken ALL integration attempts)
+The persistent ~90deg across b03b/d/e was a GN sign bug (rhs must be -w*r). FIXED: on a SYNTHETIC angular
+pose-graph with oracle far-apart closures -> 12deg (solver correct). But on the MAZE, even with ORACLE
+closures + the fixed solver, heading recovery is UNRELIABLE / HIGH-VARIANCE (20deg on some mazes, 90-144deg
+on others) and the grid per-step constraint HURTS (frame/noise). Two fundamental reasons surfaced:
+  1. **Winding ambiguity**: total heading drift ~0.09*sqrt(T); when it exceeds pi (T~1200 -> n~30 -> ~61x61),
+     RELATIVE closures (mod 2pi) can't recover the absolute winding -> heading unrecoverable beyond that size.
+  2. **Gauge-like drift**: relative closures only make heading consistent; the absolute drifts with closure-
+     distance to the start anchor. Closures back to start are sparse (DFS), so it drifts.
+Plus grid noise (~20deg) defeats per-step quadrant unwrapping (b03-grid-unwrap: ~90deg, flips persist).
+
+## VERDICT on the heading attack (exhaustive: b01,b02,b03a-e, grid-unwrap, oracle/learned, ~10 approaches)
+- REAL component: **b03c 95% relative-quadrant matcher** (landmark-geometry, OOD-transferable).
+- The grid gives DRIFT-FREE heading mod-90 (~20deg noise).
+- **Absolute heading is FUNDAMENTALLY BOUNDED**: (a) winding ambiguity for total-drift>pi (size set by
+  rot_noise; ~61x61 at 0.09), (b) gauge drift to the start anchor, (c) grid noise defeats unwrapping. No
+  reliable cross-size absolute-heading solve was found.
+- BEST consistent estimator: **b02 learned full-episode, ~30deg(n6) -> 67deg(n64)** (mediocre, degrading).
+- So GLOBAL state-tracking (which needs heading) is fundamentally OOD-bounded; LOCAL is size-invariant;
+  NAVIGATION is topological and does not need absolute heading (the practical out).
