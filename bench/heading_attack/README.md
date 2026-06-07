@@ -83,3 +83,46 @@ Plus grid noise (~20deg) defeats per-step quadrant unwrapping (b03-grid-unwrap: 
 - BEST consistent estimator: **b02 learned full-episode, ~30deg(n6) -> 67deg(n64)** (mediocre, degrading).
 - So GLOBAL state-tracking (which needs heading) is fundamentally OOD-bounded; LOCAL is size-invariant;
   NAVIGATION is topological and does not need absolute heading (the practical out).
+
+## ★ CORRECTED FINAL VERDICT (b04-b09) — the previous verdict was right about the START frame but MISFRAMED it
+Prompted by the question "is it really fundamental, or could more data/compute push further?", I re-attacked
+with the right frame and an estimator-free information analysis. Result: a clean, multiply-confirmed decomposition.
+
+**A bug first:** `_grid_heading` is REFLECTED (gh ~ HALF - ang%HALF), so it ANTI-rotates with the command.
+Harmless for the relative matcher (b03c), FATAL for absolute tracking. Negate it (`gh = -_grid_heading`). Also:
+the "~20deg grid noise" in the old verdict was the reflection artifact — the TRUE fine-heading noise is ~5deg.
+
+**The decomposition (heading rel walls = fine mod-90 + 90*quadrant):**
+- **Fine heading mod-90 (vs the WALLS): drift-free ~5deg, SIZE-INVARIANT to 259x259** (b06). The walls are an
+  omnipresent global landmark -> this is allothetic, not path-integrated -> no drift, no size dependence.
+- **The QUADRANT (2 bits): gauge-bound, GROWS with size, and is the ONLY hard part.**
+  - b05 (estimator-free information floor = effective resistance to the start anchor): EXPLORE 13->26->42deg
+    (n=6->12->24); DENSE-revisit 9->16->25deg. Grows because it's referenced to a SINGLE anchor and the
+    closure graph's resistance to it grows with maze diameter. This is the optimal floor — no estimator beats it.
+  - b07 (re-anchor the quadrant by loop closure): does NOT fix it — the anchors are themselves quadrant-
+    uncertain, so re-anchoring spreads errors instead of removing them. (Confirms b05: it's information, not estimator.)
+  - b08 (can a LEARNED net read the absolute quadrant from one view? = the "more data/compute" test):
+    train acc 95.8% (pure per-maze memorization) but **balanced OOD acc ~28-30%, declining to chance(25%)**.
+    The absolute quadrant is NOT in the local views — the maze is (near-)exactly 4-fold rotationally symmetric.
+    => NOT a data/compute limitation; the information is physically absent.
+- **The whole blocker is the 4-fold symmetry.** b09: add ONE omnipresent orientation cue (a compass/sun/
+  direction-colored walls), even 10%-wrong, and FULL absolute heading becomes SIZE-INVARIANT: p=0 -> 12deg,
+  p=0.1 -> 23deg, DEAD FLAT 13x13 -> 259x259. No cue -> drifts ~85deg.
+
+**Answer to "can we go forever (math/physics/neuro)?":**
+- YES, forever & size-invariantly, for everything anchored to a GLOBAL reference: fine heading mod-90 (walls),
+  local windowed metric, topology. These are at their information floor (~5deg) and flat to 259x259.
+- NO for the single global symmetry label (the quadrant) + global metric position: gauge-bound (grow with
+  distance-from-the-one-anchor), AND information-theoretically unrecoverable from local views in a symmetric
+  maze. This is NOT fixable by data/compute/architecture. It IS fixable by ONE featural global cue.
+- This is gauge theory (global-field observables bounded; single-point-referenced observables integrate noise)
+  AND classical neuro: head-direction cells path-integrate (drift) + re-anchor to allothetic cues; and the
+  residual symmetry is exactly Cheng-1986's GEOMETRIC MODULE rotational error (animals make 180deg errors in a
+  2-fold-symmetric box, cannot break it with geometry alone, need a featural cue). Our 4-fold maze = same law.
+
+=> SPOTLIGHT FRAME: egocentric state in a (symmetric) maze splits provably into a globally-anchored
+SIZE-INVARIANT part (recoverable to the info floor at ANY size) + a single global symmetry label that is
+gauge-bound & locally-unobservable (collapsed by one featural cue). Baselines that integrate ONE global frame
+drift on the second part; a tracker that locks the recoverable decomposition (grid mod-90 + topology + local
+metric) and treats the symmetry label as a settable latent is size-invariant by construction. Three independent
+confirmations (information floor, online tracker, learnability) + neuro grounding + a benchmark with a symmetry knob.
