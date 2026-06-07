@@ -63,9 +63,10 @@ if __name__ == "__main__":
     ap.add_argument("--save", default="")   # if set, torch.save the trained model state_dict here
     ap.add_argument("--canon", default="cmd", choices=["cmd", "corrected", "true"])  # heading frame for canonicalization
     ap.add_argument("--traversal", type=int, default=0)   # 1 = oracle-DFS traversal data (real maze-crossing, fixes the spinning confound)
+    ap.add_argument("--action_noise", type=float, default=0.03)  # translation odometry noise (raise to test memory's drift-fixing when frame is stable)
     a = ap.parse_args()
     print(f"device={DEV} train_sizes={a.train_sizes} eval_sizes={a.eval_sizes} epochs={a.epochs}", flush=True)
-    G = dict(ambiguity=1, canon=a.canon, rot_noise=0.09, loop=0.3)
+    G = dict(ambiguity=1, canon=a.canon, rot_noise=0.09, loop=0.3, action_noise=a.action_noise)
     t0 = time.time()
     GEN = gen_allo_dfs if a.traversal else gen_allo
     Tm = 40 if a.traversal else 24                          # traversal needs a longer (size-scaled) path
