@@ -1,0 +1,17 @@
+PHASE DIAGRAM (A): global-heading floor (deg) over loop x size (dense closures). <45 = recoverable.
+ loop\\n |     17     25     33     49
+     0.0 |     85    143    158    326
+     0.1 |     88    124    176    157
+     0.3 |     57     68     70     93
+     0.6 |     23     48     61     62
+     0.9 |     20     23     29     30
+
+PHASE DIAGRAM (B): floor (deg) over loop x closure-density (npc), fixed n=16. <45 = recoverable.
+loop\\npc |      5     10     20     40
+      0.0 |    513    490    313    158
+      0.1 |    503    468    261    176
+      0.3 |    492    295    111     70
+      0.6 |    479    262    120     61
+      0.9 |    473    189     60     29
+
+saved phase_diagram.png + phase_data.npz
