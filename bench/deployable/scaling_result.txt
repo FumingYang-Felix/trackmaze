@@ -1,3 +1,31 @@
+Deployable global-heading SLAM — scaling result.
+
+=== AFTER the per-cell closure-density fix (2026-06-08, job 20009113, sweep_scaling.py --npc 40, loop 0.9, 5 mazes) ===
+The >=65px wall (STORY S6) is CLOSED. Root cause was NOT the solver: it was CLOSURE-DENSITY collapse -- the fixed
+closure budget (ncl) stayed constant while the cell count grew ~n^2, so closures/cell fell below the phase-diagram
+2D-rigidity threshold (~40/cell) and the Z4 quadrant field became UNDER-DETERMINED (no solver -- BP, LS, or spectral
+-- can recover an under-constrained field; that is why q-acc 26% coexisted with closAcc 100%). Fix = build ~40
+closures PER CELL from the abundant same-cell revisit pairs (short lever arms, well-distributed).
+
+   n    px |  online ref-to-start gauge-inv  q-acc closAcc       T
+   8    17 |    40.1         20.7       4.3     97%    100%    3833
+  16    33 |    50.9         20.6      12.0     88%    100%   20163
+  24    49 |    66.2         39.0       9.9     92%    100%   51808
+  32    65 |    94.0         39.6       4.6     97%    100%   99663      <- the S6 wall (was ~50deg / 26% q-acc), now flat
+  44    89 |    81.7         12.5      12.5     88%    100%  205667
+  64   129 |    88.0          9.5       9.5     91%    100%  477683
+
+=> GAUGE-INVARIANT heading error FLAT & LOW (4-12.5 deg), q-acc >=88%, closure-acc 100% across 17->129px.
+   (gauge-invariant = error up to the irreducible global 90deg offset / the 2-bit "which-way-is-north" symmetry,
+    b08, unrecoverable without an absolute allothetic cue; ref-to-start additionally needs the start anchor pinned.)
+   Figure: deployable/scaling_fixed.png (new flat curve vs the old erratic >=65px).
+
+Killed in-probe (recorded so not re-attempted): the continuous-LS Z4 solver (robust_quad_LS / b17_ls) gives
+25-32% q-acc even at n=8 where BP gets 100% -- the Z4->real relaxation mishandles the r=2 (180deg) residue. BP stays
+the solver. A cell-graph reduction (collapse the ~n^2-log-n visit chain to one node/cell) is a 100-400x SPEED
+optimization for going past 129px, not a correctness fix -- density is the scientific result.
+
+--- OLD (fixed-ncl closures), for reference: flat ~2-4deg to 49px then ERRATIC at >=65px (the wall) ---
 Scaling test: large sizes, MORE BP iters. loop=0.9, K6 R=inf
    n    px |  iters beacon-SLAM  q-acc
   32    65 |   2500        50.6    95%

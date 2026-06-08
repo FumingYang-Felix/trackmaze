@@ -1,0 +1,5 @@
+ours homepos 0 5 0.400
+ours homepos 0 7 0.250
+ours homepos 0 12 0.100
+ours homepos 0 20 0.200
+ours homepos 0 28 0.000

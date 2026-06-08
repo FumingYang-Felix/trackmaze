@@ -1,0 +1,9 @@
+ours 0
+ours 1
+gru_corr 0
+gru_corr 1
+gru_cmd 0
+gru_cmd 1
+gru_cmd 2
+gru_corr 2
+ours 2

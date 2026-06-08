@@ -1,0 +1,6 @@
+gru_cmd main 1 5 0.042 2.66
+gru_cmd main 1 7 0.042 6.19
+gru_cmd main 1 12 0.083 7.99
+gru_cmd main 1 20 0.000 nan
+gru_cmd main 1 28 0.000 nan
+gru_cmd main 1 40 0.000 nan

@@ -1,0 +1,6 @@
+ours strong 2 5 0.667 0.72
+ours strong 2 7 0.625 1.53
+ours strong 2 12 0.583 1.11
+ours strong 2 20 0.542 1.98
+ours strong 2 28 0.417 1.80
+ours strong 2 40 0.167 6.66

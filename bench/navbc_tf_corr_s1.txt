@@ -1,0 +1,5 @@
+tf_corr main 1 5 0.167 2.21
+tf_corr main 1 7 0.125 3.46
+tf_corr main 1 12 0.000 nan
+tf_corr main 1 20 0.000 nan
+tf_corr main 1 28 0.000 nan

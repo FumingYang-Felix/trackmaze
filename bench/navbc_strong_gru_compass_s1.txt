@@ -1,0 +1,6 @@
+gru_compass strong 1 5 0.667 1.07
+gru_compass strong 1 7 0.583 1.38
+gru_compass strong 1 12 0.292 1.59
+gru_compass strong 1 20 0.417 2.66
+gru_compass strong 1 28 0.250 3.97
+gru_compass strong 1 40 0.458 4.42

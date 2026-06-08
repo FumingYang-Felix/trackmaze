@@ -1,0 +1,6 @@
+gru_corr main 0 5 0.583 1.59
+gru_corr main 0 7 0.583 2.19
+gru_corr main 0 12 0.417 2.28
+gru_corr main 0 20 0.292 3.61
+gru_corr main 0 28 0.292 1.99
+gru_corr main 0 40 0.000 nan

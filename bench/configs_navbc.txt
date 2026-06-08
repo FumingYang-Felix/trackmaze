@@ -1,0 +1,12 @@
+gru_cmd 0
+gru_cmd 1
+gru_cmd 2
+gru_corr 0
+gru_corr 1
+gru_corr 2
+tf_corr 0
+tf_corr 1
+tf_corr 2
+ours 0
+ours 1
+ours 2

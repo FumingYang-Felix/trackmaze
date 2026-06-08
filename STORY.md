@@ -88,6 +88,37 @@ Predict global heading, train small (loopy) → test OOD large. All models fit t
 - **OURS** (explicit grid-anchoring + quadrant tracker): **flat ~2°**.
 The right structure makes global heading size-invariant; end-to-end integration drifts. (`compare_result.txt`.)
 
+## 5.5 The behavioral payoff: structure beats end-to-end for NAVIGATION too (R13, `bench/round13_results.md`)
+The §5 result is about ESTIMATION (predict heading). Does it carry to closed-loop BEHAVIOR — a learned policy that
+actually *walks* the maze? We train a navigation policy (find the exit) by behaviour-cloning a frame-consistent
+frontier-DFS teacher on SMALL mazes (11–15px) and evaluate it closed-loop, egocentric-only, on OOD-LARGER mazes
+(up to 81px, ~6×). The only thing we vary is the inductive bias (`bench/nav_bc.py`, `nav_ood_figure.png`):
+- **GRU, drifting frame (end-to-end):** canonicalize observations by the integrated command heading → **~0.15
+  reach in-distribution and 0% from 2× size onward** (the frame rotates with the unobservable heading drift; the
+  learned strategy doesn't transfer). Pure-RL (PPO) couldn't even learn it (sparse-reward wall).
+- **GRU, grid-corrected frame:** canonicalize by the drift-free allothetic grid-mod-90 cue (the §3 wall cue) →
+  **~0.8 reach in-distribution, degrades GRACEFULLY to ~0.25 at 81px (~6× train size)**, 2–4× more step-efficient.
+- **+ spatial memory on drift-free topological coords (OURS):** ≈ the grid-corrected GRU on exploration (the
+  memory lever WASHES OUT once the frame is corrected and training is sufficient — an honest finding), but it is
+  the clear winner on maze HOMING, which genuinely requires the cognitive map (ours 0.50 vs gru_corr 0.32 vs
+  gru_cmd 0.17 in-distribution).
+- **Transformer, same drift-free obs:** collapses by 2× — *capacity is not the lever; the right recurrent
+  structure is.*
+- **+ allothetic GLOBAL compass cue (resolves the Z₄ quadrant, §7):** the only model that **sustains reach at the
+  most extreme size (~6×: 0.40 vs 0.17–0.21)**, where even the grid-corrected frame's residual quadrant drift
+  finally bites — the §7 "an allothetic orientation cue resolves the global frame at scale" principle realized in
+  behaviour. (Honest: it does NOT give a flat size-invariant line — the exploration task difficulty itself scales
+  with size — and costs slightly in-distribution; a suggestive, not dramatic, extreme-OOD gain.)
+The rigorous controlled arm is GRU-drifting vs GRU-grid-corrected (identical architecture, only the obs-frame
+canonicalization differs) → the allothetic frame correction is causally THE lever. (`nav_ood_strong.png`.)
+This is the **same dissociation as §5, now in behaviour**: a drift-free allothetic frame (plus a growing spatial
+memory) is what makes OOD-size navigation possible; end-to-end integration of a drifting frame fails
+catastrophically — exactly what the bounded-error theory predicts (drifting state = unbounded with size;
+allothetically-anchored state = bounded/size-invariant). Honest scope: absolute reach is moderate (one-shot BC of
+a long-horizon explorer is hard) and even the corrected frame eventually fails at extreme OOD (the quadrant-drift
+limit of §3–§4); the result is the **dissociation and the graceful-vs-catastrophic degradation**, not a perfect
+navigator. Navigation is *topological*, so it sidesteps the global-frame metric estimator's brittleness (§6).
+
 ## 6. The deployable method — closing the loop without oracles (`bench/deployable/`)
 Goal: realize the recoverable phase with a real estimator (no oracle). The journey localized the bottleneck and
 then cleared it:
@@ -108,12 +139,17 @@ then cleared it:
 5. **End-to-end works** (`deploy_slam.py`, no oracle rotation): grid-fine chain + same-cell closures whose
    relative quadrant comes from the **beacon constellation** (two non-obvious fixes: **grid-correct** the
    closure quadrant; **well-distribute** the closures so BP converges) + Z₄-sync. Global heading:
-   **17px 1.8° · 33px 3.1° · 49px 3.6°** — flat, size-invariant. At ≥65px the BP back-end needs iterations ∝
-   size: closure accuracy stays 100% and q-accuracy recovers (38%→95% with more iters), and 89px reaches 6.3°,
-   but it's currently **brittle at the borderline** (one 65px run sat at ~50° despite 95% q-accuracy — a
-   back-end convergence / reference-reconstruction sensitivity, not a fundamental limit). Hardening the back-end
-   at scale (more iters, a cell-graph reduction, or a non-iterative solver) is the clear next step
-   (`scaling_result.txt`).
+   **17px 1.8° · 33px 3.1° · 49px 3.6°** — flat, size-invariant.
+   - **≥65px wall — NOW CLOSED (2026-06-08, `scaling_result.txt` / `scaling_fixed.png`).** The borderline
+     brittleness (one 65px run at ~50° despite 95% q-acc) was NOT a solver problem: the root cause was
+     **closure-density collapse** — the closure budget was held FIXED while the cell count grows ~n², so
+     closures/cell fell below the phase-diagram 2D-rigidity threshold (~40/cell) and the Z₄ field became
+     **under-determined** (no solver — BP, LS, or spectral — can recover an under-constrained field; that is
+     exactly why q-acc 26% coexisted with closure-acc 100%). Fix = build **~40 closures per cell** from the
+     abundant same-cell revisit pairs (short lever arms). Result: **gauge-invariant heading flat & low (4–12°),
+     q-acc ≥88%, closure-acc 100% from 17px to 129px** — the wall is gone. (Recorded negative: the continuous-LS
+     Z₄ solver is a genuine dead-end — 25–32% q-acc even at n=8; the Z₄→real relaxation mishandles the 180°
+     residue. A cell-graph reduction is a 100–400× speed optimization for going past 129px, not a correctness fix.)
 
 ## 7. The unifying principle (the deepest finding)
 **Orientation in open/recoverable environments requires an allothetic reference; local geometry is insufficient

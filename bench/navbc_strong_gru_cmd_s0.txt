@@ -1,0 +1,6 @@
+gru_cmd strong 0 5 0.125 2.21
+gru_cmd strong 0 7 0.083 5.51
+gru_cmd strong 0 12 0.042 3.95
+gru_cmd strong 0 20 0.000 nan
+gru_cmd strong 0 28 0.000 nan
+gru_cmd strong 0 40 0.000 nan

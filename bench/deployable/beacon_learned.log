@@ -1,0 +1,6 @@
+Training LEARNED beacon matcher (local beacons bd=0.3 nt=8 R=8)...
+   n | learned-beacon quad acc
+   8 | 63%
+  16 | 64%
+  24 | 58%
+>=80% => local beacons + learned matcher break rotation; ~60% => local rotation-ambiguity is real.

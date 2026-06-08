@@ -1,0 +1,6 @@
+gru_corr strong 1 5 0.833 1.43
+gru_corr strong 1 7 0.542 0.99
+gru_corr strong 1 12 0.375 1.42
+gru_corr strong 1 20 0.542 3.75
+gru_corr strong 1 28 0.292 1.40
+gru_corr strong 1 40 0.333 7.15
